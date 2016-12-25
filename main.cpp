@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 		}
 	}
 	fclose(fp);
-	std::cout << "vc " << vc << ", sc " << sc << std::endl;
+	std::cout << "keyframe count: " << vc << ", frame count " << sc << std::endl;
 	return 0;
 }
 
