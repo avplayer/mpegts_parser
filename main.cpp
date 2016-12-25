@@ -1,4 +1,6 @@
-﻿#include "mpegts.hpp"
+﻿// g++ main.cpp mpegts.cpp -I .
+
+#include "mpegts.hpp"
 #include <iostream>
 #include <boost/asio/streambuf.hpp>
 
