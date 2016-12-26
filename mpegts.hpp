@@ -16,6 +16,29 @@
 
 namespace util {
 
+	enum {
+		unkown_type = 0x00,
+		video_mpeg1 = 0x01,
+		video_mpeg2 = 0x02,
+		audio_mpeg1 = 0x03,
+		audio_mpeg2 = 0x04,
+		private_section = 0x05,
+		private_data = 0x06,
+		audio_aac = 0x0f,
+		audio_aac_latm = 0x11,
+		video_mpeg4 = 0x10,
+		metadata = 0x15,
+		video_h264 = 0x1b,
+		video_hevc = 0x24,
+		video_cavs = 0x42,
+		video_vc1 = 0xea,
+		video_dirac = 0xd1,
+		audio_ac3 = 0x81,
+		audio_dts = 0x82,
+		audio_truehd = 0x83,
+		audio_eac3 = 0x87,
+	};
+
 	struct mpegts_info
 	{
 		mpegts_info()
@@ -27,6 +50,7 @@ namespace util {
 			, dts_(-1)
 			, is_video_(false)
 			, is_audio_(false)
+			, stream_type_(0)
 			, payload_begin_(nullptr)
 			, payload_end_(nullptr)
 		{}
@@ -47,6 +71,7 @@ namespace util {
 		int64_t dts_;
 		bool is_video_;
 		bool is_audio_;
+		int stream_type_;
 		uint8_t* payload_begin_;
 		uint8_t* payload_end_;
 	};
@@ -64,7 +89,7 @@ namespace util {
 	public:
 		bool do_parser(const uint8_t* parse_ptr, mpegts_info& info);
 		std::vector<uint8_t>& matadata();
-		int stream_type() const;
+		uint8_t stream_type(uint16_t pid) const;
 
 	protected:
 		inline bool do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info);
@@ -78,9 +103,9 @@ namespace util {
 		// 在2个start之间, 是否已经确定帧类型, 如果已经确定, 那么就不必再找了.
 		std::bitset<0x2000> m_type_pids;
 		bool m_has_pat;
-		// bool m_has_sps_pps;
 		// key = stream type id, value = stream type name.
 		std::map<uint8_t, std::string> m_stream_types;
-		int m_stream_type;
+		// key = pid, value = stream type id.
+		std::vector<uint8_t> m_streams;
 	};
 }

@@ -91,8 +91,6 @@ namespace util {
 
 	mpegts_parser::mpegts_parser()
 	{
-		// m_pmt_pid = -1;
-
 		m_stream_types[0x01] = "MPEG2VIDEO|ISO/IEC 11172-2 Video";	// v
 		m_stream_types[0x02] = "MPEG2VIDEO|ISO/IEC 13818-2 Video";	// v
 		m_stream_types[0x03] = "MP3|ISO/IEC 11172-3 Audio";
@@ -133,7 +131,7 @@ namespace util {
 		m_stream_types[0x81] = "AC3";
 		m_stream_types[0x8a] = "DTS";
 
-		m_stream_type = 0;
+		m_streams.resize(0x2000, 0);
 
 		// m_has_sps_pps = false;
 		m_has_pat = false;
@@ -161,6 +159,7 @@ namespace util {
 		info.cc_ = parse_ptr[3] & 0x0f;
 		info.start_ = payload_unit_start_indicator;
 		info.pid_ = PID;
+		info.stream_type_ = m_streams[PID];
 
 		// 跳过这些专用数据包.
 		if (PID == 0x0001 || PID == 0x0002 || PID == 0x0010 || PID == 0x0011 ||
@@ -269,9 +268,11 @@ namespace util {
 				if (m_stream_types.find(stream_type) != m_stream_types.end())
 				{
 					if (stream_type == 0x1b || stream_type == 0x20)
-						m_stream_type = 264;
-					if (stream_type == 0x24)
-						m_stream_type = 265;
+						m_streams[PID] = video_h264;
+					else if (stream_type == 0x24)
+						m_streams[PID] = video_hevc;
+					else
+						m_streams[PID] = stream_type;
 					parse_ptr++;
 					uint16_t elementary_PID = ((parse_ptr[0] & 0x1F) << 8) | parse_ptr[1];
 					BOOST_ASSERT(elementary_PID <= 0x1fff);
@@ -411,7 +412,7 @@ namespace util {
 			const uint8_t* ptr = info.payload_begin_;
 			const uint8_t* end = info.payload_end_;
 
-			if (m_stream_type == 264 && !has_found_type)
+			if (m_streams[PID] == video_h264 && !has_found_type)
 			{
 				uint32_t state = -1;
 				int nalu_type;
@@ -444,7 +445,7 @@ namespace util {
 					}
 				}
 			}
-			else if (m_stream_type == 265 && !has_found_type)
+			else if (m_streams[PID] == video_hevc && !has_found_type)
 			{
 				uint32_t state = -1;
 				int nalu_type;
@@ -502,9 +503,9 @@ namespace util {
 		return m_matadata;
 	}
 
-	int mpegts_parser::stream_type() const
+	uint8_t mpegts_parser::stream_type(uint16_t pid) const
 	{
-		return m_stream_type;
+		return m_streams[pid];
 	}
 
 }
