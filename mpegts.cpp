@@ -220,13 +220,12 @@ namespace util {
 			std::memcpy(&m_matadata[0], base_ptr, 188);
 
 			// 设置返回信息.
-			info.pid_ = PID;
 			info.type_ = mpegts_info::pat;
 
 			return true;
 		}
 
-		if (m_pmt_pids.test(PID) && m_has_pat)
+		if (m_pmt_pids[PID] && m_has_pat)
 		{
 			if (has_adaptation)
 			{
@@ -318,7 +317,6 @@ namespace util {
 			// 保存PMT数据包到matadata中.
 			std::memcpy(&m_matadata[188], base_ptr, 188);
 
-			info.pid_ = PID;
 			info.type_ = mpegts_info::pmt;
 
 			return true;
