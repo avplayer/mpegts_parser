@@ -15,12 +15,12 @@ int main(int argc, char** argv) {
 	int offset = 0;
 	while (!feof(fp)) {
 		if (buf.size() < 188) {
-			auto pre = boost::asio::buffer_cast<void*>(buf.prepare(188));
-			auto sz = fread(pre, 1, 188, fp);
+			auto pre = boost::asio::buffer_cast<void*>(buf.prepare(188 * 1000));
+			auto sz = fread(pre, 1, 188 * 1000, fp);
 			buf.commit(sz);
 		}
 
-		if (buf.size() >= 188) {
+		while (buf.size() >= 188) {
 			const uint8_t* data = boost::asio::buffer_cast<const uint8_t*>(buf.data());
 			util::mpegts_info info;
 			auto suc = p.do_parser(data, info);
