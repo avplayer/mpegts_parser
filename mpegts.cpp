@@ -267,12 +267,6 @@ namespace util {
 				uint8_t stream_type = *parse_ptr;
 				if (m_stream_types.find(stream_type) != m_stream_types.end())
 				{
-					if (stream_type == 0x1b || stream_type == 0x20)
-						m_streams[PID] = video_h264;
-					else if (stream_type == 0x24)
-						m_streams[PID] = video_hevc;
-					else
-						m_streams[PID] = stream_type;
 					parse_ptr++;
 					uint16_t elementary_PID = ((parse_ptr[0] & 0x1F) << 8) | parse_ptr[1];
 					BOOST_ASSERT(elementary_PID <= 0x1fff);
@@ -283,6 +277,12 @@ namespace util {
 					n += (5 + ES_info_length);
 
 					// 记录音频和视频的PID.
+					m_streams[elementary_PID] = stream_type;
+					if (stream_type == 0x1b || stream_type == 0x20)
+						m_streams[elementary_PID] = video_h264;
+					else if (stream_type == 0x24)
+						m_streams[elementary_PID] = video_hevc;
+
 					if (stream_type == 0x1b || stream_type == 0x20 ||
 						stream_type == 0x01 || stream_type == 0x02 ||
 						stream_type == 0x10 || stream_type == 0x24 ||
@@ -412,7 +412,7 @@ namespace util {
 			const uint8_t* ptr = info.payload_begin_;
 			const uint8_t* end = info.payload_end_;
 
-			if (m_streams[PID] == video_h264 && !has_found_type)
+			if (info.stream_type_ == video_h264 && !has_found_type)
 			{
 				uint32_t state = -1;
 				int nalu_type;
@@ -445,7 +445,7 @@ namespace util {
 					}
 				}
 			}
-			else if (m_streams[PID] == video_hevc && !has_found_type)
+			else if (info.stream_type_ == video_hevc && !has_found_type)
 			{
 				uint32_t state = -1;
 				int nalu_type;
