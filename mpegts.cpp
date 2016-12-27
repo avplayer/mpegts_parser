@@ -508,4 +508,11 @@ namespace util {
 		return m_streams[pid];
 	}
 
+	std::string mpegts_parser::stream_name(uint16_t pid) const
+	{
+		auto found = m_stream_types.find(m_streams[pid]);
+		if (found != m_stream_types.end())
+			return std::string(found->second);
+		return "";
+	}
 }

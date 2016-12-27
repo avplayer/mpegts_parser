@@ -89,7 +89,9 @@ namespace util {
 	public:
 		bool do_parser(const uint8_t* parse_ptr, mpegts_info& info);
 		std::vector<uint8_t>& matadata();
+
 		uint8_t stream_type(uint16_t pid) const;
+		std::string stream_name(uint16_t pid) const;
 
 	protected:
 		inline bool do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info);
