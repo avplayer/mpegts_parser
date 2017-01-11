@@ -13,6 +13,141 @@ namespace util {
 #define PES_HEADER_SIZE				6
 #define PES_HEADER_OPTIONAL_SIZE	3
 
+#ifndef AV_RB32
+#   define AV_RB32(x)                                \
+	(((uint32_t)((const uint8_t*)(x))[0] << 24) |    \
+			   (((const uint8_t*)(x))[1] << 16) |    \
+			   (((const uint8_t*)(x))[2] <<  8) |    \
+				((const uint8_t*)(x))[3])
+#endif
+
+	const uint8_t ts_log2_tab[256] = {
+			0,0,1,1,2,2,2,2,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+			5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+			6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+			6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+			7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+			7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+			7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+			7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7
+	};
+
+	const uint8_t ts_h264_golomb_to_pict_type[5] = {
+		av_picture_type_p, av_picture_type_b, av_picture_type_i,
+		av_picture_type_sp, av_picture_type_si
+	};
+
+	static inline const int ts_log2(unsigned int v)
+	{
+		int n = 0;
+		if (v & 0xffff0000) {
+			v >>= 16;
+			n += 16;
+		}
+		if (v & 0xff00) {
+			v >>= 8;
+			n += 8;
+		}
+		n += ts_log2_tab[v];
+
+		return n;
+	}
+
+	/* simple bitstream parser, automatically skips over
+	 * emulation_prevention_three_bytes. */
+	typedef struct {
+		const uint8_t *data;
+		const uint8_t *end;
+		/* bitpos in the cache of next bit */
+		int head;
+		/* cached bytes */
+		uint64_t cache;
+	} bitstream;
+
+	static inline void ts_bitstream_init(bitstream* bs, const uint8_t * data, int size)
+	{
+		bs->data = data;
+		bs->end = data + size;
+		bs->head = 0;
+		/* fill with something other than 0 to detect emulation prevention bytes */
+		bs->cache = 0xffffffff;
+	}
+
+	static inline uint32_t ts_bitstream_read(bitstream* bs, int n)
+	{
+		uint32_t res = 0;
+		int shift;
+
+		if (n == 0)
+			return res;
+
+		/* fill up the cache if we need to */
+		while (bs->head < n) {
+			uint8_t byte;
+			bool check_three_byte;
+			check_three_byte = true;
+		next_byte:
+			if (bs->data >= bs->end) {
+				/* we're at the end, can't produce more than head number of bits */
+				n = bs->head;
+				break;
+			}
+			/* get the byte, this can be an emulation_prevention_three_byte that we need
+			* to ignore. */
+			byte = *bs->data++;
+			if (check_three_byte && byte == 0x03 && ((bs->cache & 0xffff) == 0)) {
+				/* next byte goes unconditionally to the cache, even if it's 0x03 */
+				check_three_byte = false;
+				goto next_byte;
+			}
+			/* shift bytes in cache, moving the head bits of the cache left */
+			bs->cache = (bs->cache << 8) | byte;
+			bs->head += 8;
+		}
+
+		/* bring the required bits down and truncate */
+		if ((shift = bs->head - n) > 0)
+			res = static_cast<uint32_t>(bs->cache >> shift);
+		else
+			res = static_cast<uint32_t>(bs->cache);
+
+		/* mask out required bits */
+		if (n < 32)
+			res &= (1 << n) - 1;
+
+		bs->head = shift;
+
+		return res;
+	}
+
+	static inline bool ts_bitstream_eos(bitstream* bs)
+	{
+		return (bs->data >= bs->end) && (bs->head == 0);
+	}
+
+	/* read unsigned Exp-Golomb code */
+	static inline int ts_bitstream_read_ue(bitstream * bs)
+	{
+		int i = 0;
+
+		while (ts_bitstream_read(bs, 1) == 0 && !ts_bitstream_eos(bs) && i < 32)
+			i++;
+
+		return ((1 << i) - 1 + ts_bitstream_read(bs, i));
+	}
+
+	/* read signed Exp-Golomb code */
+	static inline int ts_bitstream_read_se(bitstream * bs)
+	{
+		int i = 0;
+
+		i = ts_bitstream_read_ue(bs);
+		/* (-1)^(i+1) Ceil (i / 2) */
+		i = (i + 1) / 2 * (i & 1 ? 1 : -1);
+
+		return i;
+	}
+
 	static inline bool ts_has_payload(const uint8_t *p_ts)
 	{
 		return !!(p_ts[3] & 0x10);
@@ -49,14 +184,6 @@ namespace util {
 
 		return ts_payload(p_ts) + 1; /* pointer_field */
 	}
-
-#ifndef AV_RB32
-#   define AV_RB32(x)                                \
-	(((uint32_t)((const uint8_t*)(x))[0] << 24) |    \
-			   (((const uint8_t*)(x))[1] << 16) |    \
-			   (((const uint8_t*)(x))[2] <<  8) |    \
-				((const uint8_t*)(x))[3])
-#endif
 
 	static inline const uint8_t *find_start_code(const uint8_t * p,
 		const uint8_t *end, uint32_t * state)
@@ -490,7 +617,20 @@ namespace util {
 			{
 				m_type_pids[info.pid_] = 1;
 				if (nalu_type == NAL_UNIT_TYPE_IDR)
-				info.type_ = mpegts_info::idr;
+				{
+					info.type_ = mpegts_info::idr;
+					info.pict_type_ = av_picture_type_i;
+				}
+				else
+				{
+					bitstream bs;
+
+					ts_bitstream_init(&bs, ptr, static_cast<int>(end - ptr));
+					ts_bitstream_read_ue(&bs); // skip first_mb_in_slice.
+
+					auto slice_type = ts_bitstream_read_ue(&bs);
+					info.pict_type_ = ts_h264_golomb_to_pict_type[slice_type % 5];
+				}
 				break;
 			}
 		}
@@ -510,6 +650,7 @@ namespace util {
 			if (nalu_type >= 16 && nalu_type <= 23)
 			{
 				info.type_ = mpegts_info::idr;
+				info.pict_type_ = av_picture_type_i;
 				m_type_pids[info.pid_] = 1;
 				break;
 			}
@@ -526,16 +667,16 @@ namespace util {
 
 			if (ptr[3] == 0x00)
 			{
-				auto frame_type = (ptr[5] & 0x38) >> 3;
+				info.pict_type_ = (ptr[5] & 0x38) >> 3;
 
-				if (frame_type == 1)
+				if (info.pict_type_ == av_picture_type_i)
 				{
 					info.type_ = mpegts_info::idr;
 					info.start_ = true;
 					break;
 				}
 
-				if (frame_type == 2 || frame_type == 3)
+				if (info.pict_type_ == av_picture_type_p || info.pict_type_ == av_picture_type_b)
 				{
 					info.start_ = true;
 					break;
