@@ -95,6 +95,9 @@ namespace util {
 
 	protected:
 		inline bool do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info);
+		inline void do_parse_h264(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
+		inline void do_parse_hevc(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
+		inline void do_parse_mpeg2(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
 
 	protected:
 		std::bitset<0x2000> m_video_elementary_PIDs;

@@ -412,6 +412,20 @@ namespace util {
 			const uint8_t* ptr = info.payload_begin_;
 			const uint8_t* end = info.payload_end_;
 
+			switch (info.stream_type_)
+			{
+				case video_h264:
+					if (!has_found_type)
+						do_parse_h264(ptr, end, info);
+					break;
+				case video_hevc:
+					if (!has_found_type)
+						do_parse_hevc(ptr, end, info);
+					break;
+				case video_mpeg2:
+					do_parse_mpeg2(ptr, end, info);
+			}
+#if 0
 			if (info.stream_type_ == video_h264 && !has_found_type)
 			{
 				uint32_t state = -1;
@@ -464,10 +478,68 @@ namespace util {
 					}
 				}
 			}
+#endif
 		}
 
 		return true;
 	}
+
+	inline void mpegts_parser::do_parse_h264(const uint8_t* ptr, const uint8_t* end, mpegts_info& info)
+	{
+		uint32_t state = -1;
+		int nalu_type;
+		while (ptr < end)
+		{
+			ptr = find_start_code(ptr, end, &state);
+			if ((state & 0xFFFFFF00) != 0x100)
+				break;
+			nalu_type = state & 0x1F;
+			enum {
+				NAL_UNIT_TYPE_UNKNOWN = 0,
+				NAL_UNIT_TYPE_SLICE = 1,
+				NAL_UNIT_TYPE_DPA = 2,
+				NAL_UNIT_TYPE_DPB = 3,
+				NAL_UNIT_TYPE_DPC = 4,
+				NAL_UNIT_TYPE_IDR = 5,
+				NAL_UNIT_TYPE_SEI = 6,
+				NAL_UNIT_TYPE_SPS = 7,
+				NAL_UNIT_TYPE_PPS = 8,
+				NAL_UNIT_TYPE_AUD = 9,
+				NAL_UNIT_TYPE_END_SEQUENCE = 10,
+				NAL_UNIT_TYPE_END_STREAM = 11,
+			};
+			if (nalu_type == NAL_UNIT_TYPE_SLICE || nalu_type <= NAL_UNIT_TYPE_IDR)
+			{
+				m_type_pids[info.pid_] = 1;
+				if (nalu_type == NAL_UNIT_TYPE_IDR)
+				info.type_ = mpegts_info::idr;
+				break;
+			}
+		}
+	}
+
+	inline void mpegts_parser::do_parse_hevc(const uint8_t* ptr, const uint8_t* end, mpegts_info& info)
+	{
+		uint32_t state = -1;
+		int nalu_type;
+
+		while (ptr < end)
+		{
+			ptr = find_start_code(ptr, end, &state);
+			if (--ptr + 2 >= end)
+				break;
+			nalu_type = (*ptr >> 1) & 0x3f;
+			if (nalu_type >= 16 && nalu_type <= 23)
+			{
+				info.type_ = mpegts_info::idr;
+				m_type_pids[info.pid_] = 1;
+				break;
+			}
+		}
+	}
+
+	inline void mpegts_parser::do_parse_mpeg2(const uint8_t* ptr, const uint8_t* end, mpegts_info& info)
+	{}
 
 	bool mpegts_parser::do_parser(const uint8_t* parse_ptr, mpegts_info& info)
 	{
