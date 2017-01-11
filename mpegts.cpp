@@ -526,9 +526,7 @@ namespace util {
 
 			if (ptr[3] == 0x00)
 			{
-				// auto temperal_sequence_number = (ptr[4] << 2) + ((ptr[5] & 0xc0) >> 6);
 				auto frame_type = (ptr[5] & 0x38) >> 3;
-				// auto vbv_delay = ((ptr[5] & 0x02) << 13) + (ptr[6] << 5) + ((ptr[7] & 0xf8) >> 3);
 
 				if (frame_type == 1)
 				{
