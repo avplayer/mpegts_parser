@@ -454,6 +454,7 @@ namespace util {
 					if (!has_found_type)
 						do_parse_hevc(ptr, end, info);
 					break;
+				case video_mpeg1:
 				case video_mpeg2:
 					do_parse_mpeg2(ptr, end, info);
 			}
