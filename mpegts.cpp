@@ -457,60 +457,6 @@ namespace util {
 				case video_mpeg2:
 					do_parse_mpeg2(ptr, end, info);
 			}
-#if 0
-			if (info.stream_type_ == video_h264 && !has_found_type)
-			{
-				uint32_t state = -1;
-				int nalu_type;
-				while (ptr < end)
-				{
-					ptr = find_start_code(ptr, end, &state);
-					if ((state & 0xFFFFFF00) != 0x100)
-						break;
-					nalu_type = state & 0x1F;
-					enum {
-						NAL_UNIT_TYPE_UNKNOWN = 0,
-						NAL_UNIT_TYPE_SLICE = 1,
-						NAL_UNIT_TYPE_DPA = 2,
-						NAL_UNIT_TYPE_DPB = 3,
-						NAL_UNIT_TYPE_DPC = 4,
-						NAL_UNIT_TYPE_IDR = 5,
-						NAL_UNIT_TYPE_SEI = 6,
-						NAL_UNIT_TYPE_SPS = 7,
-						NAL_UNIT_TYPE_PPS = 8,
-						NAL_UNIT_TYPE_AUD = 9,
-						NAL_UNIT_TYPE_END_SEQUENCE = 10,
-						NAL_UNIT_TYPE_END_STREAM = 11,
-					};
-					if (nalu_type == NAL_UNIT_TYPE_SLICE || nalu_type <= NAL_UNIT_TYPE_IDR)
-					{
-						m_type_pids[PID] = 1;
-						if (nalu_type == NAL_UNIT_TYPE_IDR)
-							info.type_ = mpegts_info::idr;
-						break;
-					}
-				}
-			}
-			else if (info.stream_type_ == video_hevc && !has_found_type)
-			{
-				uint32_t state = -1;
-				int nalu_type;
-
-				while (ptr < end)
-				{
-					ptr = find_start_code(ptr, end, &state);
-					if (--ptr + 2 >= end)
-						break;
-					nalu_type = (*ptr >> 1) & 0x3f;
-					if (nalu_type >= 16 && nalu_type <= 23)
-					{
-						info.type_ = mpegts_info::idr;
-						m_type_pids[PID] = 1;
-						break;
-					}
-				}
-			}
-#endif
 		}
 
 		return true;
