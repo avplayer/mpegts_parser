@@ -54,6 +54,8 @@ int main(int argc, char** argv)
 				vc++;
 			if (info.start_ && info.is_video_) {
 				sc++;
+				if (info.type_ == util::mpegts_info::idr)
+					std::cout << "flags=K_" << std::endl;
 				std::cout << "pos=" << offset << std::endl;
 			}
 
