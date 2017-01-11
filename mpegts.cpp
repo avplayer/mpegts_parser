@@ -165,7 +165,6 @@ namespace util {
 
 		m_streams.resize(0x2000, 0);
 
-		// m_has_sps_pps = false;
 		m_has_pat = false;
 		m_matadata.resize(188 * 2);
 		m_cc_pids.resize(0x2000, -1);
