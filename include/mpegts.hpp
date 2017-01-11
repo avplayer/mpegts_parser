@@ -39,12 +39,24 @@ namespace util {
 		audio_eac3 = 0x87,
 	};
 
+	enum {
+		av_picture_type_none = 0,	///< Undefined
+		av_picture_type_i,			///< Intra
+		av_picture_type_p,			///< Predicted
+		av_picture_type_b,			///< Bi-dir predicted
+		av_picture_type_s,			///< S(GMC)-VOP MPEG4
+		av_picture_type_si,			///< Switching Intra
+		av_picture_type_sp,			///< Switching Predicted
+		av_picture_type_bi,			///< BI type
+	};
+
 	struct mpegts_info
 	{
 		mpegts_info()
 			: pid_(-1)
 			, start_(false)
 			, cc_(0)
+			, pict_type_(av_picture_type_none)
 			, type_(reserve)
 			, pts_(-1)
 			, dts_(-1)
@@ -67,6 +79,7 @@ namespace util {
 			data,
 			nullpkt,
 		} type_;
+		int pict_type_;
 		int64_t pts_;
 		int64_t dts_;
 		bool is_video_;
