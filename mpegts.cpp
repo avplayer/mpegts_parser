@@ -1,6 +1,7 @@
 ﻿#include "mpegts.hpp"
 #include <iostream>
 #include <cstring>
+#include <algorithm>
 #include <boost/assert.hpp>
 
 namespace util {
@@ -57,7 +58,7 @@ namespace util {
 				((const uint8_t*)(x))[3])
 #endif
 
-	const uint8_t *find_start_code(const uint8_t * p,
+	static inline const uint8_t *find_start_code(const uint8_t * p,
 		const uint8_t *end, uint32_t * state)
 	{
 		int i;
@@ -87,6 +88,37 @@ namespace util {
 		*state = AV_RB32(p);
 
 		return p + 4;
+	}
+
+	static inline void* ts_memmem(const void *haystack, size_t haystack_len,
+		const void *needle, size_t needle_len)
+	{
+		const char *begin = (const char *)haystack;
+		const char *last_possible = begin + haystack_len - needle_len;
+		const char *tail = (const char *)needle;
+		char point;
+
+		/*
+		 * The first occurrence of the empty string is deemed to occur at
+		 * the beginning of the string.
+		 */
+		if (needle_len == 0)
+			return (void *)begin;
+
+		/*
+		 * Sanity check, otherwise the loop might search through the whole
+		 * memory.
+		 */
+		if (haystack_len < needle_len)
+			return NULL;
+
+		point = *tail++;
+		for (; begin <= last_possible; begin++) {
+			if (*begin == point && !memcmp(begin + 1, tail, needle_len - 1))
+				return (void *)begin;
+		}
+
+		return NULL;
 	}
 
 	mpegts_parser::mpegts_parser()
@@ -539,7 +571,41 @@ namespace util {
 	}
 
 	inline void mpegts_parser::do_parse_mpeg2(const uint8_t* ptr, const uint8_t* end, mpegts_info& info)
-	{}
+	{
+		while (ptr < end)
+		{
+			ptr = (uint8_t*)ts_memmem(ptr, end - ptr, "\000\000\001", 3);
+			if (!ptr)
+				break;
+
+			if (ptr[3] == 0x00)
+			{
+				auto temperal_sequence_number = (ptr[4] << 2) + ((ptr[5] & 0xc0) >> 6);
+				auto frame_type = (ptr[5] & 0x38) >> 3;
+				auto vbv_delay = ((ptr[5] & 0x02) << 13) + (ptr[6] << 5) + ((ptr[7] & 0xf8) >> 3);
+
+#if 1
+				static char x[] = "xIPBDxxx";
+				printf("\t  temperal sequence number: %2d, "
+					"frame type: %d(%c), vbv delay: %d\n", temperal_sequence_number, frame_type, x[frame_type], vbv_delay);
+#endif
+				if (frame_type == 1)
+				{
+					info.type_ = mpegts_info::idr;
+					info.start_ = true;
+					break;
+				}
+
+				if (frame_type == 2 || frame_type == 3)
+				{
+					info.start_ = true;
+					break;
+				}
+			}
+
+			ptr += 3;
+		}
+	}
 
 	bool mpegts_parser::do_parser(const uint8_t* parse_ptr, mpegts_info& info)
 	{
