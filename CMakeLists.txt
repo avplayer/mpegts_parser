@@ -16,10 +16,12 @@ set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 find_package(Boost COMPONENTS system filesystem REQUIRED)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 add_executable(mpegts_parser
   main.cpp
-  mpegts.cpp
-  mpegts.hpp
+  src/mpegts.cpp
+  include/mpegts.hpp
 )
 
 if(UNIX)
