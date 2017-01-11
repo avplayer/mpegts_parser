@@ -606,6 +606,7 @@ namespace util {
 	{
 		bool ret = do_internal_parser(parse_ptr, info);
 
+#if CONTINUITY_CHECK
 		// 检查cc的连续性.
 		if (ret)
 		{
@@ -627,6 +628,7 @@ namespace util {
 			}
 			m_cc_pids[info.pid_] = info.cc_;
 		}
+#endif
 
 		return ret;
 	}
