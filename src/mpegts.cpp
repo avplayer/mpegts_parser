@@ -621,6 +621,7 @@ namespace util {
 					info.type_ = mpegts_info::idr;
 					info.pict_type_ = av_picture_type_i;
 				}
+#ifndef DISABLE_PARSE_PICT_TYPE
 				else
 				{
 					bitstream bs;
@@ -631,6 +632,7 @@ namespace util {
 					auto slice_type = ts_bitstream_read_ue(&bs);
 					info.pict_type_ = ts_h264_golomb_to_pict_type[slice_type % 5];
 				}
+#endif // DISABLE_PARSE_PICT_TYPE
 				break;
 			}
 		}
