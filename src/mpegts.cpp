@@ -53,100 +53,102 @@ namespace util {
 		return n;
 	}
 
-	/* simple bitstream parser, automatically skips over
-	 * emulation_prevention_three_bytes. */
-	typedef struct {
-		const uint8_t *data;
-		const uint8_t *end;
-		/* bitpos in the cache of next bit */
-		int head;
-		/* cached bytes */
-		uint64_t cache;
-	} bitstream;
-
-	static inline void ts_bitstream_init(bitstream* bs, const uint8_t * data, int size)
+	class bitstream
 	{
-		bs->data = data;
-		bs->end = data + size;
-		bs->head = 0;
-		/* fill with something other than 0 to detect emulation prevention bytes */
-		bs->cache = 0xffffffff;
-	}
+		// c++11 noncopyable.
+		bitstream(const bitstream&) = delete;
+		bitstream& operator=(const bitstream&) = delete;
 
-	static inline uint32_t ts_bitstream_read(bitstream* bs, int n)
-	{
-		uint32_t res = 0;
-		int shift;
+	public:
+		bitstream(const uint8_t * data, int size)
+			: m_data(data)
+			, m_end(data + size)
+			, m_head(0)
+			, m_cache(0xffffffff)
+		{}
+		~bitstream()
+		{}
 
-		if (n == 0)
+	public:
+		inline uint32_t read(int n)
+		{
+			uint32_t res = 0;
+			int shift;
+
+			if (n == 0)
+				return res;
+
+			/* fill up the cache if we need to */
+			while (m_head < n) {
+				uint8_t byte;
+				bool check_three_byte;
+				check_three_byte = true;
+			next_byte:
+				if (m_data >= m_end) {
+					/* we're at the end, can't produce more than head number of bits */
+					n = m_head;
+					break;
+				}
+				/* get the byte, this can be an emulation_prevention_three_byte that we need
+				* to ignore. */
+				byte = *m_data++;
+				if (check_three_byte && byte == 0x03 && ((m_cache & 0xffff) == 0)) {
+					/* next byte goes unconditionally to the cache, even if it's 0x03 */
+					check_three_byte = false;
+					goto next_byte;
+				}
+				/* shift bytes in cache, moving the head bits of the cache left */
+				m_cache = (m_cache << 8) | byte;
+				m_head += 8;
+			}
+
+			/* bring the required bits down and truncate */
+			if ((shift = m_head - n) > 0)
+				res = static_cast<uint32_t>(m_cache >> shift);
+			else
+				res = static_cast<uint32_t>(m_cache);
+
+			/* mask out required bits */
+			if (n < 32)
+				res &= (1 << n) - 1;
+
+			m_head = shift;
+
 			return res;
-
-		/* fill up the cache if we need to */
-		while (bs->head < n) {
-			uint8_t byte;
-			bool check_three_byte;
-			check_three_byte = true;
-		next_byte:
-			if (bs->data >= bs->end) {
-				/* we're at the end, can't produce more than head number of bits */
-				n = bs->head;
-				break;
-			}
-			/* get the byte, this can be an emulation_prevention_three_byte that we need
-			* to ignore. */
-			byte = *bs->data++;
-			if (check_three_byte && byte == 0x03 && ((bs->cache & 0xffff) == 0)) {
-				/* next byte goes unconditionally to the cache, even if it's 0x03 */
-				check_three_byte = false;
-				goto next_byte;
-			}
-			/* shift bytes in cache, moving the head bits of the cache left */
-			bs->cache = (bs->cache << 8) | byte;
-			bs->head += 8;
 		}
 
-		/* bring the required bits down and truncate */
-		if ((shift = bs->head - n) > 0)
-			res = static_cast<uint32_t>(bs->cache >> shift);
-		else
-			res = static_cast<uint32_t>(bs->cache);
+		inline bool eos()
+		{
+			return (m_data >= m_end) && (m_head == 0);
+		}
 
-		/* mask out required bits */
-		if (n < 32)
-			res &= (1 << n) - 1;
+		inline int read_ue()
+		{
+			int i = 0;
 
-		bs->head = shift;
+			while (read(1) == 0 && !eos() && i < 32)
+				i++;
 
-		return res;
-	}
+			return ((1 << i) - 1 + read(i));
+		}
 
-	static inline bool ts_bitstream_eos(bitstream* bs)
-	{
-		return (bs->data >= bs->end) && (bs->head == 0);
-	}
+		inline int read_se()
+		{
+			int i = 0;
 
-	/* read unsigned Exp-Golomb code */
-	static inline int ts_bitstream_read_ue(bitstream * bs)
-	{
-		int i = 0;
+			i = read_ue();
+			/* (-1)^(i+1) Ceil (i / 2) */
+			i = (i + 1) / 2 * (i & 1 ? 1 : -1);
 
-		while (ts_bitstream_read(bs, 1) == 0 && !ts_bitstream_eos(bs) && i < 32)
-			i++;
+			return i;
+		}
 
-		return ((1 << i) - 1 + ts_bitstream_read(bs, i));
-	}
-
-	/* read signed Exp-Golomb code */
-	static inline int ts_bitstream_read_se(bitstream * bs)
-	{
-		int i = 0;
-
-		i = ts_bitstream_read_ue(bs);
-		/* (-1)^(i+1) Ceil (i / 2) */
-		i = (i + 1) / 2 * (i & 1 ? 1 : -1);
-
-		return i;
-	}
+	private:
+		const uint8_t* m_data;
+		const uint8_t* m_end;
+		int m_head;
+		uint64_t m_cache;
+	};
 
 	static inline bool ts_has_payload(const uint8_t *p_ts)
 	{
@@ -623,12 +625,9 @@ namespace util {
 				}
 				else
 				{
-					bitstream bs;
-
-					ts_bitstream_init(&bs, ptr, static_cast<int>(end - ptr));
-					ts_bitstream_read_ue(&bs); // skip first_mb_in_slice.
-
-					auto slice_type = ts_bitstream_read_ue(&bs);
+					bitstream bs(ptr, static_cast<int>(end - ptr));
+					bs.read_ue(); // skip first_mb_in_slice.
+					auto slice_type = bs.read_ue();
 					info.pict_type_ = ts_h264_golomb_to_pict_type[slice_type % 5];
 				}
 				break;
