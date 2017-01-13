@@ -293,7 +293,7 @@ namespace util {
 		m_stream_types[0x8a] = "DTS";
 
 		m_streams.resize(0x2000, 0);
-
+		m_pcr_pid = -1;
 		m_has_pat = false;
 		m_matadata.resize(188 * 2);
 		m_cc_pids.resize(0x2000, -1);
@@ -409,7 +409,7 @@ namespace util {
 			parse_ptr++;		// reserved, version_number, current_next_indicator.
 			parse_ptr++;		// section_number.
 			parse_ptr++;		// last_section_number.
-			uint16_t PCR_PID = ((parse_ptr[0] & 0x1f) << 8) + parse_ptr[1];
+			m_pcr_pid = ((parse_ptr[0] & 0x1f) << 8) + parse_ptr[1];
 			parse_ptr += 2;
 			uint16_t program_info_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
 			parse_ptr += 2;
@@ -533,6 +533,25 @@ namespace util {
 
 			info.payload_begin_ = payload;
 			info.payload_end_ = payload + payload_size;
+		}
+
+		if (m_pcr_pid == PID)
+		{
+			if (/*(parse_ptr[3] & 0x20)*/ has_adaptation && // adaptation.
+				(parse_ptr[5] & 0x10) &&
+				(parse_ptr[4] >= 7))
+			{
+				// PCR is 33 bits.
+				info.pcr_ = ((int64_t)parse_ptr[6] << 25) |
+					((int64_t)parse_ptr[7] << 17) |
+					((int64_t)parse_ptr[8] << 9) |
+					((int64_t)parse_ptr[9] << 1) |
+					(((int64_t)parse_ptr[10] & 0x80) >> 7);
+				int64_t pcr_ext =
+					(parse_ptr[10] & 0x01) << 8 |
+					(parse_ptr[11]);
+				info.pcr_ = (info.pcr_ * 300 + pcr_ext) / 27000;
+			}
 		}
 
 		// 是否为音视频流.

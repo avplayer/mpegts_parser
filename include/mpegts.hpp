@@ -58,6 +58,7 @@ namespace util {
 			, cc_(0)
 			, pict_type_(av_picture_type_none)
 			, type_(reserve)
+			, pcr_(-1)
 			, pts_(-1)
 			, dts_(-1)
 			, is_video_(false)
@@ -80,6 +81,7 @@ namespace util {
 			nullpkt,
 		} type_;
 		int pict_type_;
+		int64_t pcr_;
 		int64_t pts_;
 		int64_t dts_;
 		bool is_video_;
@@ -121,6 +123,7 @@ namespace util {
 		// 在2个start之间, 是否已经确定帧类型, 如果已经确定, 那么就不必再找了.
 		std::bitset<0x2000> m_type_pids;
 		bool m_has_pat;
+		int16_t m_pcr_pid;
 		// key = stream type id, value = stream type name.
 		std::map<uint8_t, std::string> m_stream_types;
 		// key = pid, value = stream type id.
