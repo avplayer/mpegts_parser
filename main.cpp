@@ -23,14 +23,20 @@ int main(int argc, char** argv)
 		("show_frame_pts", po::value<bool>(&show_frame_pts)->default_value(false), "Show frame pts.")
 		("show_frame_dts", po::value<bool>(&show_frame_dts)->default_value(false), "Show frame dts.")
 		("show_key_frame", po::value<bool>(&show_key_frame)->default_value(false), "Show key frame.")
-	;
+		;
 
-	po::variables_map vm;
-	po::store(po::parse_command_line(argc, argv, desc), vm);
-	po::notify(vm);
+	try {
+		po::variables_map vm;
+		po::store(po::parse_command_line(argc, argv, desc), vm);
+		po::notify(vm);
 
-	if (argc < 2 || vm.count("help") || file.empty()) {
-		std::cout << desc << "\n";
+		if (argc < 2 || vm.count("help") || file.empty()) {
+			std::cout << desc << "\n";
+			return -1;
+		}
+	}
+	catch (std::exception& e) {
+		std::cerr << "Exception: " << e.what();
 		return -1;
 	}
 
