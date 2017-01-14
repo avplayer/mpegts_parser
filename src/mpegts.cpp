@@ -286,11 +286,10 @@ namespace util {
 		m_stream_types[0x84] = "EAC3";
 		m_stream_types[0x85] = "DTS";
 		m_stream_types[0x86] = "DTS";
+		m_stream_types[0x8a] = "DTS";
 		m_stream_types[0xa1] = "EAC3";
 		m_stream_types[0xa2] = "DTS";
 		m_stream_types[0x90] = "HDMV_PGS_SUBTITLE";
-		m_stream_types[0x81] = "AC3";
-		m_stream_types[0x8a] = "DTS";
 
 		m_streams.resize(0x2000, 0);
 
@@ -443,23 +442,23 @@ namespace util {
 					else if (stream_type == 0x24)
 						m_streams[elementary_PID] = video_hevc;
 
-					if (stream_type == 0x1b || stream_type == 0x20 ||
-						stream_type == 0x01 || stream_type == 0x02 ||
+					if (stream_type == 0x01 || stream_type == 0x02 ||
+						stream_type == 0x1b || stream_type == 0x20 ||
 						stream_type == 0x10 || stream_type == 0x24 ||
 						stream_type == 0x42 || stream_type == 0xd1 ||
 						stream_type == 0xea)
 					{
 						m_video_elementary_PIDs.set(elementary_PID);
 					}
-					else if (stream_type == 0x0f || stream_type == 0x03 ||
-						stream_type == 0x06 ||
-						stream_type == 0x04 || stream_type == 0x80 ||
-						stream_type == 0x81 || stream_type == 0x82 ||
-						stream_type == 0x83 || stream_type == 0x84 ||
-						stream_type == 0x85 || stream_type == 0x86 ||
+					else if (
+						stream_type == 0x03 || stream_type == 0x04 ||
+						stream_type == 0x0f || stream_type == 0x11 ||
+						stream_type == 0x80 || stream_type == 0x81 ||
+						stream_type == 0x82 || stream_type == 0x83 ||
+						stream_type == 0x84 || stream_type == 0x85 ||
+						stream_type == 0x86 || stream_type == 0x8a ||
 						stream_type == 0xa1 || stream_type == 0xa2 ||
-						stream_type == 0x90 || stream_type == 0x81 ||
-						stream_type == 0x8a)
+						stream_type == 0x90)
 					{
 						m_audio_elementary_PIDs.set(elementary_PID);
 					}
