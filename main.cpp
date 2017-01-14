@@ -109,7 +109,7 @@ int main(int argc, char** argv)
 			}
 
 			if (show_pcr_time && info.pcr_ != -1) {
-				std::cout << "pts=" << info.pcr_ << std::endl;
+				std::cout << "pcr=" << info.pcr_ << std::endl;
 			}
 
 			if (!suc)
