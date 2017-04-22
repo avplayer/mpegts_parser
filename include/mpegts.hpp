@@ -11,10 +11,223 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include <cinttypes>
 #include <bitset>
 
 namespace util {
+
+	class byte_streambuf
+	{
+		// c++11 noncopyable.
+		byte_streambuf(const byte_streambuf&) = delete;
+		byte_streambuf& operator=(const byte_streambuf&) = delete;
+
+		enum { buffer_delta = 256 };
+
+	public:
+		byte_streambuf()
+		{
+			clear();
+		}
+		~byte_streambuf()
+		{}
+
+		// 支持move构造.
+		byte_streambuf(byte_streambuf&& rhs)
+			: m_buffer(std::move(rhs.m_buffer))
+		{
+			setg(rhs.m_get_first, rhs.m_get_next, rhs.m_get_last);
+			setp(rhs.m_put_first, rhs.m_put_next, rhs.m_put_last);
+		}
+
+	public:
+		void clear()
+		{
+			m_buffer.swap(std::vector<uint8_t>());
+
+			m_max_size = std::numeric_limits<std::size_t>::max();
+			std::size_t pend = (std::min<std::size_t>)(m_max_size, buffer_delta);
+			m_buffer.resize((std::max<std::size_t>)(pend, 1));
+
+			setg(&m_buffer[0], &m_buffer[0], &m_buffer[0]);
+			setp(&m_buffer[0], &m_buffer[0] + pend);
+		}
+
+		void shrink_to_fit()
+		{
+			// Get current stream positions as offsets.
+			std::size_t gnext = gptr() - &m_buffer[0];
+			std::size_t pnext = pptr() - &m_buffer[0];
+			std::size_t pend = epptr() - &m_buffer[0];
+
+			if ((pend - pnext) > (pnext - gnext))
+			{
+				// Shift existing contents of get area to start of buffer.
+				if (gnext > 0)
+				{
+					pnext -= gnext;
+					std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
+				}
+
+				m_buffer.resize(pnext);
+				m_buffer.shrink_to_fit();
+
+				// Update stream positions.
+				pend = pnext;
+				setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
+				setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
+			}
+		}
+
+		size_t size() const noexcept
+		{
+			return pptr() - gptr();
+		}
+
+		size_t capacity() const noexcept
+		{
+			return m_buffer.capacity();
+		}
+
+		const uint8_t* data() const noexcept
+		{
+			return gptr();
+		}
+
+		uint8_t* prepare(size_t n)
+		{
+			reserve(n);
+			return pptr();
+		}
+
+		void commit(size_t n)
+		{
+			if (pptr() + n > epptr())
+			{
+				//	n = epptr() - pptr();
+				std::length_error ex("byte_streambuf commit too long");
+				throw ex;
+			}
+
+			m_put_next += n;
+			setg(eback(), gptr(), pptr());
+		}
+
+		void consume(size_t n)
+		{
+			if (egptr() < pptr())
+				setg(&m_buffer[0], gptr(), pptr());
+			if (gptr() + n > pptr())
+			{
+				// n = pptr() - gptr();
+				std::length_error ex("byte_streambuf consume too long");
+				throw ex;
+			}
+
+			m_get_next += n;
+		}
+
+	protected:
+		void reserve(std::size_t n)
+		{
+			// Get current stream positions as offsets.
+			std::size_t gnext = gptr() - &m_buffer[0];
+			std::size_t pnext = pptr() - &m_buffer[0];
+			std::size_t pend = epptr() - &m_buffer[0];
+
+			// Check if there is already enough space in the put area.
+			if (n <= pend - pnext)
+			{
+				return;
+			}
+
+			// Shift existing contents of get area to start of buffer.
+			if (gnext > 0)
+			{
+				pnext -= gnext;
+				std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
+			}
+
+			// Ensure buffer is large enough to hold at least the specified size.
+			if (n > pend - pnext)
+			{
+				if (n <= m_max_size && pnext <= m_max_size - n)
+				{
+					pend = pnext + n;
+					m_buffer.resize((std::max<std::size_t>)(pend, 1));
+				}
+				else
+				{
+					std::length_error ex("byte_streambuf too long");
+					throw ex;
+				}
+			}
+
+			// Update stream positions.
+			setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
+			setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
+		}
+
+		void setg(uint8_t* f, uint8_t* n, uint8_t* l)
+		{
+			m_get_first = f;
+			m_get_next = n;
+			m_get_last = l;
+		}
+
+		void setp(uint8_t* f, uint8_t* l)
+		{
+			m_put_first = f;
+			m_put_next = f;
+			m_put_last = l;
+		}
+
+		void setp(uint8_t* f, uint8_t* n, uint8_t* l)
+		{
+			m_put_first = f;
+			m_put_next = n;
+			m_put_last = l;
+		}
+
+		uint8_t* pptr() const
+		{
+			return m_put_next;
+		}
+
+		uint8_t* gptr() const
+		{
+			return m_get_next;
+		}
+
+		uint8_t* epptr() const
+		{
+			return m_put_last;
+		}
+
+		uint8_t* eback() const
+		{
+			return m_get_first;
+		}
+
+		uint8_t* egptr() const
+		{
+			return m_get_last;
+		}
+
+	private:
+		std::vector<uint8_t> m_buffer;
+
+		uint8_t* m_get_first;
+		uint8_t* m_get_next;
+		uint8_t* m_get_last;
+
+		uint8_t* m_put_first;
+		uint8_t* m_put_next;
+		uint8_t* m_put_last;
+
+		size_t m_max_size;
+	};
 
 	enum {
 		unkown_type = 0x00,
@@ -75,6 +288,7 @@ namespace util {
 			: pid_(-1)
 			, start_(false)
 			, cc_(0)
+			, crc_(0xffffffff)
 			, pict_type_(av_picture_type_none)
 			, type_(reserve)
 			, pcr_(-1)
@@ -90,6 +304,7 @@ namespace util {
 		int pid_;
 		bool start_;
 		int cc_;
+		uint32_t crc_;
 		enum pkt_t
 		{
 			pat,
@@ -110,6 +325,21 @@ namespace util {
 		uint8_t* payload_end_;
 	};
 
+	struct stream_info
+	{
+		int pid_;
+		enum
+		{
+			stream_video,
+			stream_audio,
+		} type_;
+
+		int stream_type_;
+	};
+
+
+	uint32_t crc32(const uint8_t* data, size_t len);
+
 	class mpegts_parser
 	{
 		// c++11 noncopyable.
@@ -121,17 +351,33 @@ namespace util {
 		~mpegts_parser();
 
 	public:
-		bool do_parser(const uint8_t* parse_ptr, mpegts_info& info);
+		bool do_parser(const uint8_t* parse_ptr, mpegts_info& info, bool check_crc = false);
 		std::vector<uint8_t>& matadata();
 
 		uint8_t stream_type(uint16_t pid) const;
 		std::string stream_name(uint16_t pid) const;
+		uint16_t stream_type(const std::string& name) const;
+
+	public:
+		// 初始化用于编码到ts的流信息.
+		bool init_streams(const std::vector<stream_info>& streams);
+
+		// 添加数据到ts编码器中.
+		bool mux_stream(const mpegts_info& info);
+
+		// 获取已经编码的ts数据大小.
+		int mpegts_size() const;
+		// 从已经编码的ts数据缓冲中取出指定大小的ts数据.
+		void fetch_mpegts(uint8_t* data, int size);
 
 	protected:
-		inline bool do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info);
+		inline bool do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info, bool check_crc = false);
 		inline void do_parse_h264(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
 		inline void do_parse_hevc(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
 		inline void do_parse_mpeg2(const uint8_t* ptr, const uint8_t* end, mpegts_info& info);
+
+		void add_pat(uint8_t* ts);
+		void add_pmt(uint8_t* ts);
 
 	protected:
 		std::bitset<0x2000> m_video_elementary_PIDs;
@@ -147,5 +393,14 @@ namespace util {
 		std::map<uint8_t, std::string> m_stream_types;
 		// key = pid, value = stream type id.
 		std::vector<uint8_t> m_streams;
+
+		// ts编码相关信息.
+		std::map<int, mpegts_info> m_mpegts;
+		int m_pmt_pid;
+		int64_t m_packet_count;
+		int m_pcr_packet_count;
+		int m_pat_count;
+		int m_pmt_count;
+		byte_streambuf m_mpegts_data;
 	};
 }
