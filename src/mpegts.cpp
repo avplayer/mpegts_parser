@@ -422,7 +422,8 @@ namespace util {
 				parse_ptr += 1;
 			}
 
-			parse_ptr += 1;	// table id.
+			auto section_ptr = parse_ptr;
+			parse_ptr += 1;	// sikp table id, table id == 0.
 			int section_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
 			parse_ptr += 7;
 			if (section_length >= TS_SIZE - TS_HEADER_SIZE)
@@ -451,6 +452,14 @@ namespace util {
 				m_pmt_pids.set(pmt_id);
 			}
 
+			// CRC32
+			info.crc_ = AV_RB32(parse_ptr);
+			auto crc = crc32(section_ptr, parse_ptr - section_ptr);
+			if (crc != info.crc_)
+			{
+				std::cerr << "parse PAT section crc32 error, crc = " << crc
+					<< ", crc in data = " << info.crc_ << std::endl;
+			}
 			// 保存PAT数据包.
 			if (m_matadata.size() == 0)
 				m_matadata.resize(188 * 2);
@@ -479,22 +488,28 @@ namespace util {
 				parse_ptr += 1;
 			}
 
-			uint8_t table_id = *parse_ptr;	// table id.
+			auto section_ptr = parse_ptr;
+			uint8_t table_id = *parse_ptr;	// table id == 2.
 			parse_ptr++;
 			uint16_t section_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
-			parse_ptr += 2;
+			parse_ptr += 2;		// section_syntax_indicator(1) + '0'(1) + reserved(2) + section_length(12)
 			parse_ptr += 2;		// program_number
 			parse_ptr++;		// reserved, version_number, current_next_indicator.
 			parse_ptr++;		// section_number.
 			parse_ptr++;		// last_section_number.
 			m_pcr_pid = ((parse_ptr[0] & 0x1f) << 8) + parse_ptr[1];
-			parse_ptr += 2;
+			parse_ptr += 2;		// reserved(3) + PCR_PID(13).
 			uint16_t program_info_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
-			parse_ptr += 2;
-			parse_ptr += program_info_length;
+			parse_ptr += 2;		// program_info_length(16).
+			parse_ptr += program_info_length; // skip program_info descriptor.
 
+			// 9 = program_number(16) + reserved(2) + version_number(5) +
+			//     current_next_indicator(1) + section_number(8) +
+			//     last_section_number(8) + reserved(3) + PCR_PID(13) +
+			//     reserved(4) + program_info_length(12)
+			// 4 = crc32(4)
 			int N1 = section_length - (9 + 4 + program_info_length);
-			if (N1 >= TS_SIZE - TS_HEADER_SIZE)
+			if (N1 >= TS_SIZE - TS_HEADER_SIZE || N1 < 0)
 			{
 				std::cerr << "parse N1 error, N1 = " << N1 << std::endl;
 				return false;
@@ -505,13 +520,13 @@ namespace util {
 				uint8_t stream_type = *parse_ptr;
 				if (m_stream_types.find(stream_type) != m_stream_types.end())
 				{
-					parse_ptr++;
+					parse_ptr++;					// stream_type.
 					uint16_t elementary_PID = ((parse_ptr[0] & 0x1F) << 8) | parse_ptr[1];
 					BOOST_ASSERT(elementary_PID <= 0x1fff);
-					parse_ptr += 2;
+					parse_ptr += 2;					// reserved + elementary_PID.
 					uint16_t ES_info_length = ((parse_ptr[0] & 0x0F) << 8) | parse_ptr[1];
-					parse_ptr += 2;
-					parse_ptr += ES_info_length;
+					parse_ptr += 2;					// reserved + ES_info_length.
+					parse_ptr += ES_info_length;	// skip ES_info descriptor.
 					n += (5 + ES_info_length);
 
 					// 记录音频和视频的PID.
@@ -543,14 +558,25 @@ namespace util {
 					}
 					else
 					{
-						std::cerr << "parse mpegts, unexpected stream type, type = " << (int)stream_type << std::endl;
+						std::cerr << "parse mpegts, unexpected stream type, type = "
+							<< (int)stream_type << std::endl;
 					}
 				}
 				else
 				{
-					std::cerr << "parse stream type error, N1 = " << N1 << ", stream_type = " << (int)stream_type << std::endl;
+					std::cerr << "parse stream type error, N1 = "
+						<< N1 << ", stream_type = " << (int)stream_type << std::endl;
 					return false;
 				}
+			}
+
+			// CRC32
+			info.crc_ = AV_RB32(parse_ptr);
+			auto crc = crc32(section_ptr, parse_ptr - section_ptr);
+			if (crc != info.crc_)
+			{
+				std::cerr << "parse PMT section crc32 error, crc = " << crc
+					<< ", crc in data = " << info.crc_ << std::endl;
 			}
 
 			// 保存PMT数据包到matadata中.
