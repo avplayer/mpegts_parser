@@ -378,7 +378,7 @@ namespace util {
 
 	}
 
-	inline bool mpegts_parser::do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info)
+	inline bool mpegts_parser::do_internal_parser(const uint8_t* parse_ptr, mpegts_info& info, bool check_crc/* = false*/)
 	{
 		// 如果不是同步字节则跳过.
 		if (*parse_ptr != 0x47)
@@ -452,14 +452,18 @@ namespace util {
 				m_pmt_pids.set(pmt_id);
 			}
 
-			// CRC32
-			info.crc_ = AV_RB32(parse_ptr);
-			auto crc = crc32(section_ptr, parse_ptr - section_ptr);
-			if (crc != info.crc_)
+			if (check_crc)
 			{
-				std::cerr << "parse PAT section crc32 error, crc = " << crc
-					<< ", crc in data = " << info.crc_ << std::endl;
+				// CRC32
+				info.crc_ = AV_RB32(parse_ptr);
+				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
+				if (crc != info.crc_)
+				{
+					std::cerr << "parse PAT section crc32 error, crc = " << crc
+						<< ", crc in data = " << info.crc_ << std::endl;
+				}
 			}
+
 			// 保存PAT数据包.
 			if (m_matadata.size() == 0)
 				m_matadata.resize(188 * 2);
@@ -493,7 +497,7 @@ namespace util {
 			parse_ptr++;
 			uint16_t section_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
 			parse_ptr += 2;		// section_syntax_indicator(1) + '0'(1) + reserved(2) + section_length(12)
-			parse_ptr += 2;		// program_number
+			parse_ptr += 2;		// program_number.
 			parse_ptr++;		// reserved, version_number, current_next_indicator.
 			parse_ptr++;		// section_number.
 			parse_ptr++;		// last_section_number.
@@ -570,13 +574,16 @@ namespace util {
 				}
 			}
 
-			// CRC32
-			info.crc_ = AV_RB32(parse_ptr);
-			auto crc = crc32(section_ptr, parse_ptr - section_ptr);
-			if (crc != info.crc_)
+			if (check_crc)
 			{
-				std::cerr << "parse PMT section crc32 error, crc = " << crc
-					<< ", crc in data = " << info.crc_ << std::endl;
+				// CRC32
+				info.crc_ = AV_RB32(parse_ptr);
+				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
+				if (crc != info.crc_)
+				{
+					std::cerr << "parse PMT section crc32 error, crc = " << crc
+						<< ", crc in data = " << info.crc_ << std::endl;
+				}
 			}
 
 			// 保存PMT数据包到matadata中.
@@ -811,7 +818,7 @@ namespace util {
 		}
 	}
 
-	bool mpegts_parser::do_parser(const uint8_t* parse_ptr, mpegts_info& info)
+	bool mpegts_parser::do_parser(const uint8_t* parse_ptr, mpegts_info& info, bool check_crc/* = false*/)
 	{
 		bool ret = do_internal_parser(parse_ptr, info);
 
