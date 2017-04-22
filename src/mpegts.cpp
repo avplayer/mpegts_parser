@@ -1194,7 +1194,7 @@ namespace util {
 		ts_set_transportpriority(ts);
 		ts_set_payload(ts);
 		ts_set_unitstart(ts);
-		ts_set_cc(ts, m_pat_count++);
+		ts_set_cc(ts, m_pmt_count++);
 		// ts_set_adaptation(ts, 0); // PMT不添加adaptation.
 
 		// TS SECTION.
