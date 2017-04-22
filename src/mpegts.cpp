@@ -6,13 +6,6 @@
 
 namespace util {
 
-#define TS_SIZE						188
-#define TS_HEADER_SIZE				4
-#define TS_HEADER_SIZE_AF			6
-#define TS_HEADER_SIZE_PCR			12
-#define PES_HEADER_SIZE				6
-#define PES_HEADER_OPTIONAL_SIZE	3
-
 #ifndef AV_RB32
 #   define AV_RB32(x)                                \
 	(((uint32_t)((const uint8_t*)(x))[0] << 24) |    \
@@ -20,6 +13,258 @@ namespace util {
 			   (((const uint8_t*)(x))[2] <<  8) |    \
 				((const uint8_t*)(x))[3])
 #endif
+
+#define TS_SIZE						188
+#define TS_HEADER_SIZE				4
+#define TS_HEADER_SIZE_AF			6
+#define TS_HEADER_SIZE_PCR			12
+#define PSI_HEADER_SIZE				3
+#define PSI_HEADER_SIZE_SYNTAX1		8
+#define PSI_CRC_SIZE				4
+#define PAT_HEADER_SIZE				PSI_HEADER_SIZE_SYNTAX1
+#define PAT_PROGRAM_SIZE			4
+#define PMT_HEADER_SIZE			    (PSI_HEADER_SIZE_SYNTAX1 + 4)
+#define PMT_ES_SIZE					5
+#define PES_HEADER_SIZE				6
+#define PES_HEADER_OPTIONAL_SIZE	3
+
+	inline bool ts_get_unitstart(const uint8_t* ts)
+	{
+		return !!(ts[1] & 0x40);
+	}
+
+	inline bool ts_has_payload(const uint8_t* ts)
+	{
+		return !!(ts[3] & 0x10);
+	}
+
+	inline bool ts_has_adaptation(const uint8_t* ts)
+	{
+		return !!(ts[3] & 0x20);
+	}
+
+	inline uint8_t ts_get_adaptation(const uint8_t* ts)
+	{
+		return ts[4];
+	}
+
+	inline uint16_t psi_get_length(const uint8_t* section)
+	{
+		return ((section[1] & 0xf) << 8) | section[2];
+	}
+
+	inline uint16_t pmt_get_desclength(const uint8_t *p)
+	{
+		return ((p[10] & 0xf) << 8) | p[11];
+	}
+
+	inline uint16_t pmtn_get_desclength(const uint8_t *p)
+	{
+		return ((p[3] & 0xf) << 8) | p[4];
+	}
+
+	inline uint8_t* pmt_get_es(uint8_t *p, uint8_t n)
+	{
+		uint16_t section_size = psi_get_length(p) + PSI_HEADER_SIZE
+			- PSI_CRC_SIZE;
+		uint8_t *pn = p + PMT_HEADER_SIZE + pmt_get_desclength(p);
+		if (pn - p > section_size) return NULL;
+
+		while (n) {
+			if (pn + PMT_ES_SIZE - p > section_size) return NULL;
+			pn += PMT_ES_SIZE + pmtn_get_desclength(pn);
+			n--;
+		}
+		if (pn - p >= section_size) return NULL;
+		return pn;
+	}
+
+	inline void ts_set_pid(uint8_t* ts, uint16_t pid)
+	{
+		ts[0] = 0x47;
+		ts[1] = 0x0;
+		ts[2] = 0x0;
+		ts[3] = 0x0;
+		ts[4] = 0x0;	// pointer_field.
+		ts[1] &= ~0x1f;
+		ts[1] |= (pid >> 8) & 0x1f;
+		ts[2] = pid & 0xff;
+	}
+
+	inline void ts_set_transportpriority(uint8_t* ts)
+	{
+		ts[1] |= 0x20;
+	}
+
+	inline void ts_set_payload(uint8_t* ts)
+	{
+		ts[3] |= 0x10;
+	}
+
+	inline void ts_set_unitstart(uint8_t* ts)
+	{
+		ts[1] |= 0x40;
+	}
+
+	inline void ts_set_cc(uint8_t* ts, uint8_t cc)
+	{
+		ts[3] &= ~0xf;
+		ts[3] |= (cc & 0xf);
+	}
+
+	inline void ts_set_adaptation(uint8_t* ts, uint8_t length)
+	{
+		ts[3] |= 0x20;
+		ts[4] = length;
+		if (length)
+			ts[5] = 0x0;
+		if (length > 1)
+			memset(&ts[6], 0xff, length - 1); /* stuffing */
+	}
+
+	inline void ts_set_scrambling(uint8_t* ts, uint8_t scrambling)
+	{
+		ts[3] &= ~0xc0;
+		ts[3] |= scrambling << 6;
+	}
+
+	inline uint8_t* ts_payload(uint8_t* ts)
+	{
+		if (!ts_has_payload(ts))
+			return ts + TS_SIZE;
+		if (!ts_has_adaptation(ts))
+			return ts + TS_HEADER_SIZE;
+		return ts + TS_HEADER_SIZE + 1 + ts_get_adaptation(ts);
+	}
+
+	inline uint8_t* ts_section(uint8_t* ts)
+	{
+		if (!ts_get_unitstart(ts))
+			return ts_payload(ts);
+
+		return ts_payload(ts) + 1; /* pointer_field */
+	}
+
+	inline void psi_set_tableid(uint8_t* section, uint8_t table_id)
+	{
+		section[0] = table_id;
+	}
+
+	inline void psi_set_syntax(uint8_t* section)
+	{
+		section[1] = 0x70;
+		section[1] |= 0x80;
+		section[5] = 0xc0;
+	}
+
+	inline void psi_set_length(uint8_t* section, uint16_t length)
+	{
+		section[1] &= ~0xf;
+		section[1] |= (length >> 8) & 0xf;
+		section[2] = length & 0xff;
+	}
+
+	inline void psi_set_number(uint8_t* section, uint16_t n)
+	{
+		section[3] = n >> 8;
+		section[4] = n & 0xff;
+	}
+
+	inline void psi_set_current(uint8_t* section)
+	{
+		section[5] |= 0x1;
+	}
+
+	inline void psi_set_version(uint8_t* section, uint8_t version)
+	{
+		section[5] = (version << 1) | 0xc0;
+	}
+
+	inline void psi_set_section(uint8_t* section, uint8_t n)
+	{
+		section[6] = n;
+	}
+
+	inline void psi_set_lastsection(uint8_t* section, uint8_t last_section)
+	{
+		section[7] = last_section;
+	}
+
+	inline void psi_set_crc(uint8_t* section)
+	{
+		uint32_t crc = 0xffffffff;
+		uint16_t end = (((section[1] & 0xf) << 8) | section[2])
+			+ PSI_HEADER_SIZE - PSI_CRC_SIZE;
+
+		crc = crc32(section, end);
+
+		section[end] = crc >> 24;
+		section[end + 1] = (crc >> 16) & 0xff;
+		section[end + 2] = (crc >> 8) & 0xff;
+		section[end + 3] = crc & 0xff;
+	}
+
+	inline void psi_set_end(uint8_t* section)
+	{
+		uint16_t end = (((section[1] & 0xf) << 8) | section[2])
+			+ PSI_HEADER_SIZE;
+		auto length = TS_SIZE - (TS_HEADER_SIZE + end + PSI_CRC_SIZE);
+		memset(section + end, 0xff, length);
+	}
+
+	inline uint8_t* pat_get_program(uint8_t* pat, uint8_t n)
+	{
+		uint8_t *pat_n = pat + PAT_HEADER_SIZE + n * PAT_PROGRAM_SIZE;
+		if (pat_n + PAT_PROGRAM_SIZE - pat >
+			psi_get_length(pat) + PSI_HEADER_SIZE - PSI_CRC_SIZE)
+			return nullptr;
+		return pat_n;
+	}
+
+	inline void patn_set_program(uint8_t* pat_n, uint16_t program)
+	{
+		pat_n[0] = program >> 8;
+		pat_n[1] = program & 0xff;
+	}
+
+	inline void patn_set_pid(uint8_t* pat_n, uint16_t pid)
+	{
+		pat_n[2] &= ~0x1f;
+		pat_n[2] |= pid >> 8;
+		pat_n[3] = pid & 0xff;
+	}
+
+	inline void pmt_set_pcrpid(uint8_t* p, uint16_t pcr_pid)
+	{
+		p[8] &= ~0x1f;
+		p[8] |= pcr_pid >> 8;
+		p[9] = pcr_pid & 0xff;
+	}
+
+	inline void pmt_set_desclength(uint8_t* p, uint16_t length)
+	{
+		p[10] &= ~0xf;
+		p[10] |= length >> 8;
+		p[11] = length & 0xff;
+	}
+
+	inline void pmtn_init(uint8_t *pmtn)
+	{
+		pmtn[1] = 0xe0;
+		pmtn[3] = 0xf0;
+	}
+
+	inline void pmtn_set_streamtype(uint8_t* pmtn, uint8_t stream_type)
+	{
+		pmtn[0] = stream_type;
+	}
+
+	inline void pmtn_set_pid(uint8_t* pmtn, uint16_t pid)
+	{
+		pmtn[1] &= ~0x1f;
+		pmtn[1] |= pid >> 8;
+		pmtn[2] = pid & 0xff;
+	}
 
 	static const uint32_t static_crc_table[256] = {
 		0x00000000, 0x04c11db7, 0x09823b6e, 0x0d4326d9,
@@ -225,43 +470,6 @@ namespace util {
 		uint64_t m_cache;
 	};
 
-	static inline bool ts_has_payload(const uint8_t *p_ts)
-	{
-		return !!(p_ts[3] & 0x10);
-	}
-
-	static inline bool ts_has_adaptation(const uint8_t *p_ts)
-	{
-		return !!(p_ts[3] & 0x20);
-	}
-
-	static inline bool ts_get_unitstart(const uint8_t *p_ts)
-	{
-		return !!(p_ts[1] & 0x40);
-	}
-
-	static inline uint8_t ts_get_adaptation(const uint8_t *p_ts)
-	{
-		return p_ts[4];
-	}
-
-	static inline uint8_t *ts_payload(uint8_t *p_ts)
-	{
-		if (!ts_has_payload(p_ts))
-			return p_ts + TS_SIZE;
-		if (!ts_has_adaptation(p_ts))
-			return p_ts + TS_HEADER_SIZE;
-		return p_ts + TS_HEADER_SIZE + 1 + ts_get_adaptation(p_ts);
-	}
-
-	static inline uint8_t *ts_section(uint8_t *p_ts)
-	{
-		if (!ts_get_unitstart(p_ts))
-			return ts_payload(p_ts);
-
-		return ts_payload(p_ts) + 1; /* pointer_field */
-	}
-
 	static inline const uint8_t *find_start_code(const uint8_t * p,
 		const uint8_t *end, uint32_t * state)
 	{
@@ -341,7 +549,7 @@ namespace util {
 		m_stream_types[0x0c] = "ISO/IEC 13818-6 type C";
 		m_stream_types[0x0d] = "ISO/IEC 13818-6 type D";
 		m_stream_types[0x0e] = "ISO/IEC 13818-1 AUXILIARY";
-		m_stream_types[0x0f] = "AAC|ISO/IEC 13818-7 Audio with ADTS transport syntax";
+		m_stream_types[0x0f] = "AAC"; // AAC|ISO/IEC 13818-7 Audio with ADTS transport syntax
 		m_stream_types[0x10] = "MPEG4|ISO/IEC 14496-2 Visual";			// v
 		m_stream_types[0x11] = "LATM|ISO/IEC 14496-3 Audio with the LATM transport syntax as defined in ISO/IEC 14496-3 / AMD 1";
 		m_stream_types[0x12] = "ISO/IEC 14496-1 SL-packetized stream or FlexMux stream carried in PES packets";
@@ -371,6 +579,12 @@ namespace util {
 		m_has_pat = false;
 		m_matadata.resize(188 * 2);
 		m_cc_pids.resize(0x2000, -1);
+
+		m_packet_count = -1;
+		m_pcr_packet_count = 0;
+		m_pat_count = 0;
+		m_pmt_count = 0;
+		m_pmt_pid = 4095;
 	}
 
 	mpegts_parser::~mpegts_parser()
@@ -425,16 +639,18 @@ namespace util {
 			auto section_ptr = parse_ptr;
 			parse_ptr += 1;	// sikp table id, table id == 0.
 			int section_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
-			parse_ptr += 7;
+			parse_ptr += 2;
+			// auto program_number = (parse_ptr[0] << 8) | parse_ptr[1];
+			parse_ptr += 5;
 			if (section_length >= TS_SIZE - TS_HEADER_SIZE)
 			{
 				std::cerr << "parse section_length error, section_length = " << section_length << std::endl;
 				return false;
 			}
 			// skip following
-			// transport_stream_id(16) + reserved(2) +
-			// version_number(5) + current_next_indicator(1) +
-			// section_number(8) + last_section_number(8) + CRC_32(4)
+			// 9 = program_number(16) + reserved(2) +
+			//	   version_number(5) + current_next_indicator(1) +
+			//     section_number(8) + last_section_number(8) + CRC_32(4bytes)
 			for (int n = 0; n < section_length - 9; n += 4)
 			{
 				uint16_t program_number = (parse_ptr[0] << 8) | parse_ptr[1];
@@ -454,7 +670,7 @@ namespace util {
 
 			if (check_crc)
 			{
-				// CRC32
+				// CRC32.
 				info.crc_ = AV_RB32(parse_ptr);
 				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
 				if (crc != info.crc_)
@@ -497,7 +713,8 @@ namespace util {
 			parse_ptr++;
 			uint16_t section_length = ((parse_ptr[0] & 0x0f) << 8) | parse_ptr[1];
 			parse_ptr += 2;		// section_syntax_indicator(1) + '0'(1) + reserved(2) + section_length(12)
-			parse_ptr += 2;		// program_number.
+			auto transport_stream_id = (parse_ptr[0] << 8) | parse_ptr[1];
+			parse_ptr += 2;		// transport_stream_id.
 			parse_ptr++;		// reserved, version_number, current_next_indicator.
 			parse_ptr++;		// section_number.
 			parse_ptr++;		// last_section_number.
@@ -507,7 +724,7 @@ namespace util {
 			parse_ptr += 2;		// program_info_length(16).
 			parse_ptr += program_info_length; // skip program_info descriptor.
 
-			// 9 = program_number(16) + reserved(2) + version_number(5) +
+			// 9 = transport_stream_id(16) + reserved(2) + version_number(5) +
 			//     current_next_indicator(1) + section_number(8) +
 			//     last_section_number(8) + reserved(3) + PCR_PID(13) +
 			//     reserved(4) + program_info_length(12)
@@ -576,7 +793,7 @@ namespace util {
 
 			if (check_crc)
 			{
-				// CRC32
+				// CRC32.
 				info.crc_ = AV_RB32(parse_ptr);
 				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
 				if (crc != info.crc_)
@@ -868,6 +1085,210 @@ namespace util {
 		}
 
 		return 0;
+	}
+
+	bool mpegts_parser::init_streams(const std::vector<stream_info>& streams)
+	{
+		for (auto& s : streams)
+		{
+			auto& p = m_mpegts[s.pid_];
+			p.pid_ = s.pid_;
+			if (p.pid_ == 0)
+			{
+				return false;
+			}
+
+			p.is_audio_ = s.type_ == stream_info::stream_audio;
+			p.is_video_ = s.type_ == stream_info::stream_video;
+
+			if (!p.is_audio_ && !p.is_video_)
+			{
+				return false;
+			}
+
+			p.stream_type_ = s.stream_type_;
+
+			if (p.stream_type_ == 0x01 ||
+				p.stream_type_ == 0x02 ||
+				p.stream_type_ == 0x03 ||
+				p.stream_type_ == 0x04 ||
+				p.stream_type_ == 0x05 ||
+				p.stream_type_ == 0x06 ||
+				p.stream_type_ == 0x07 ||
+				p.stream_type_ == 0x08 ||
+				p.stream_type_ == 0x09 ||
+				p.stream_type_ == 0x0a ||
+				p.stream_type_ == 0x0b ||
+				p.stream_type_ == 0x0c ||
+				p.stream_type_ == 0x0d ||
+				p.stream_type_ == 0x0e ||
+				p.stream_type_ == 0x0f ||
+				p.stream_type_ == 0x10 ||
+				p.stream_type_ == 0x11 ||
+				p.stream_type_ == 0x12 ||
+				p.stream_type_ == 0x13 ||
+				p.stream_type_ == 0x14 ||
+				p.stream_type_ == 0x1b ||
+				p.stream_type_ == 0x20 ||
+				p.stream_type_ == 0x24 ||
+				p.stream_type_ == 0x42 ||
+				p.stream_type_ == 0xd1 ||
+				p.stream_type_ == 0xea)
+			{
+				// stream type is ok.
+			}
+			else
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	void mpegts_parser::add_pat(uint8_t* ts)
+	{
+		// TS HEADER.
+		ts_set_pid(ts, 0);
+		ts_set_transportpriority(ts);
+		ts_set_payload(ts);
+		ts_set_unitstart(ts);
+		ts_set_cc(ts, m_pat_count++);
+		// ts_set_adaptation(ts, 0); // PAT不添加adaptation.
+
+		// TS SECTION.
+		auto section = ts_section(ts);
+		psi_set_tableid(section, 0);	// PAT的table id=0.
+		psi_set_syntax(section);
+		// section_size = (pmt_size * program(4bytes)) +
+		//                transport_stream_id(16) + reserved(2) +
+		//                version_number(5) + current_next_indicator(1) +
+		//                section_number(8) + last_section_number(8) +
+		//                CRC_32(4bytes)
+		auto pmt_size = 1; // 只实现生成一个PMT的PAT, 多个PMT暂时不考虑.
+		auto section_size = pmt_size * 4 + 5 + 4;
+		psi_set_length(section, static_cast<uint16_t>(section_size));
+		psi_set_number(section, 1); // program_number.
+
+		psi_set_version(section, 1);
+		psi_set_current(section);
+		psi_set_section(section, 0);
+		psi_set_lastsection(section, 0);
+
+		for (int i = 0; i < pmt_size; i++)
+		{
+			auto npmt = pat_get_program(section, i);
+			patn_set_program(npmt, i + 1);
+			patn_set_pid(npmt, m_pmt_pid);
+		}
+
+		// crc32.
+		psi_set_crc(section);
+		psi_set_end(section);
+	}
+
+	void mpegts_parser::add_pmt(uint8_t* ts)
+	{
+		// TS HEADER.
+		ts_set_pid(ts, m_pmt_pid);
+		ts_set_transportpriority(ts);
+		ts_set_payload(ts);
+		ts_set_unitstart(ts);
+		ts_set_cc(ts, m_pat_count++);
+		// ts_set_adaptation(ts, 0); // PMT不添加adaptation.
+
+		// TS SECTION.
+		auto section = ts_section(ts);
+		psi_set_tableid(section, 2); // PMT的table id=2.
+		psi_set_syntax(section);
+		// section_size = (stream_size * program(5bytes)) +
+		//                transport_stream_id(16) + reserved(2) +
+		//                version_number(5) + current_next_indicator(1) +
+		//                section_number(8) + last_section_number(8) +
+		//                reserved(3) + PCR_PID(13) + reserved(4) +
+		//                program_info_length(12) + program_info_length + CRC_32(4bytes)
+		auto stream_size = m_mpegts.size();
+		auto section_size = stream_size * 5 + 9 + 4;
+		psi_set_length(section, static_cast<uint16_t>(section_size));
+		psi_set_number(section, 1);	// transport_stream_id.
+		psi_set_version(section, 1);
+		psi_set_current(section);
+		psi_set_section(section, 0);
+		psi_set_lastsection(section, 0);
+
+		auto iter = m_mpegts.begin();
+		pmt_set_pcrpid(section, iter->first);	// 不使用独立的pcr包, 默认第1个流的pid带pcr信息.
+		pmt_set_desclength(section, 0);
+
+		for (int i = 0; i < stream_size; i++)
+		{
+			auto& info = iter->second;
+			iter++;
+			auto pmtn = pmt_get_es(section, i);
+			pmtn_init(pmtn);
+			pmtn_set_streamtype(pmtn, info.stream_type_);
+			if (info.is_video_)
+				pmt_set_pcrpid(section, info.pid_);	// 更新为视频流的pid带pcr信息.
+			pmtn_set_pid(pmtn, info.pid_);
+		}
+
+		// crc32.
+		psi_set_crc(section);
+		psi_set_end(section);
+	}
+
+	bool mpegts_parser::mux_stream(const mpegts_info& info)
+	{
+		// 查询是否在编码容器当中.
+		auto found = m_mpegts.find(info.pid_);
+		if (found == m_mpegts.end())
+		{
+			return false;
+		}
+
+		bool write_pat_pmt = false;
+		bool write_pcr = false;
+		bool only_audio = false;
+
+		// 判断是否添加pat pmt, 如果只有音频, 那就按pcr一样
+		// 的规则插入pat pmt包.
+		auto stream_size = m_mpegts.size();
+		if (stream_size == 1 && info.is_audio_)
+			only_audio = true;
+
+		// 如果是开始编码，那就必须插入pcr, pat, pmt.
+		if (m_packet_count == -1)
+		{
+			write_pat_pmt = true;
+			write_pcr = true;
+		}
+
+		// 插入pat/pmt包.
+		if (write_pat_pmt)
+		{
+			// 添加PAT包.
+			auto pat_data = m_mpegts_data.prepare(188);
+			add_pat(pat_data);
+			m_mpegts_data.commit(188);
+
+			// 添加PMT包.
+			auto pmt_data = m_mpegts_data.prepare(188);
+			add_pmt(pmt_data);
+			m_mpegts_data.commit(188);
+		}
+
+		return false;
+	}
+
+	int mpegts_parser::mpegts_size() const
+	{
+		return m_mpegts_data.size();
+	}
+
+	void mpegts_parser::fetch_mpegts(uint8_t* data, int size)
+	{
+		memcpy(data, m_mpegts_data.data(), size);
+		m_mpegts_data.consume(size);
 	}
 
 	std::string mpegts_parser::stream_name(uint16_t pid) const
