@@ -2,7 +2,6 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 namespace po = boost::program_options;
-#include <boost/asio/streambuf.hpp>
 
 int main(int argc, char** argv)
 {
@@ -47,7 +46,7 @@ int main(int argc, char** argv)
 	}
 
 	util::mpegts_parser p;
-	boost::asio::streambuf buf;
+	util::byte_streambuf buf;
 	int vc = 0;
 	int sc = 0;
 	int offset = 0;
@@ -55,16 +54,41 @@ int main(int argc, char** argv)
 	bool vknown_type = false;
 	bool aknown_type = false;
 
+	util::stream_info si;
+	std::vector<util::stream_info> streams;
+	si.pid_ = 40;
+	si.type_ = util::stream_info::stream_video;
+	si.stream_type_ = p.stream_type(std::string("H264"));
+	streams.push_back(si);
+	si.pid_ = 50;
+	si.type_ = util::stream_info::stream_audio;
+	si.stream_type_ = p.stream_type(std::string("AAC"));
+	streams.push_back(si);
+	p.init_streams(streams);
+	util::mpegts_info mi;
+	mi.pid_ = 40;
+	mi.is_video_ = true;
+	mi.is_audio_ = false;
+	p.mux_stream(mi);
+	{
+		util::mpegts_info info;
+		auto size = p.mpegts_size();
+		uint8_t* data = (uint8_t*)malloc(size);
+		p.fetch_mpegts(data, size);
+		p.do_parser(data, info);
+		p.do_parser(data + 188, info);
+		std::cout << info.pid_;
+	}
 	while (!feof(fp)) {
 
 		if (buf.size() < 188) {
-			auto pre = boost::asio::buffer_cast<void*>(buf.prepare(188 * 1000));
+			auto pre = buf.prepare(188 * 1000);
 			auto sz = fread(pre, 1, 188 * 1000, fp);
 			buf.commit(sz);
 		}
 
 		while (buf.size() >= 188) {
-			const uint8_t* data = boost::asio::buffer_cast<const uint8_t*>(buf.data());
+			const uint8_t* data = buf.data();
 			util::mpegts_info info;
 			auto suc = p.do_parser(data, info);
 			if (!suc) {
