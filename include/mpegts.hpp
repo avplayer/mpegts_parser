@@ -398,6 +398,8 @@ namespace util {
 		std::map<int, mpegts_info> m_mpegts;
 		int m_pmt_pid;
 		int64_t m_packet_count;
+		int64_t m_first_pcr;
+		int64_t m_total_bytes;
 		int m_pcr_packet_count;
 		int m_pat_count;
 		int m_pmt_count;

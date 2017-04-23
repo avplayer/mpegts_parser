@@ -14,6 +14,93 @@ namespace util {
 				((const uint8_t*)(x))[3])
 #endif
 
+	enum AVRounding {
+		AV_ROUND_ZERO = 0, ///< Round toward zero.
+		AV_ROUND_INF = 1, ///< Round away from zero.
+		AV_ROUND_DOWN = 2, ///< Round toward -infinity.
+		AV_ROUND_UP = 3, ///< Round toward +infinity.
+		AV_ROUND_NEAR_INF = 5, ///< Round to nearest and halfway cases away from zero.
+		AV_ROUND_PASS_MINMAX = 8192, ///< Flag to pass INT64_MIN/MAX through instead of rescaling, this avoids special cases for AV_NOPTS_VALUE
+	};
+
+	int64_t av_rescale_rnd(int64_t a, int64_t b, int64_t c, int rnd)
+	{
+		int64_t r = 0;
+		BOOST_ASSERT(c > 0);
+		BOOST_ASSERT(b >= 0);
+		BOOST_ASSERT((unsigned)(rnd&~AV_ROUND_PASS_MINMAX) <= 5 && (rnd&~AV_ROUND_PASS_MINMAX) != 4);
+
+		if (c <= 0 || b < 0 || !((unsigned)(rnd&~AV_ROUND_PASS_MINMAX) <= 5 && (rnd&~AV_ROUND_PASS_MINMAX) != 4))
+			return INT64_MIN;
+
+		if (rnd & AV_ROUND_PASS_MINMAX) {
+			if (a == INT64_MIN || a == INT64_MAX)
+				return a;
+			rnd -= AV_ROUND_PASS_MINMAX;
+		}
+
+		if (a < 0)
+			return -(uint64_t)av_rescale_rnd(-std::max(a, -INT64_MAX), b, c, rnd ^ ((rnd >> 1) & 1));
+
+		if (rnd == AV_ROUND_NEAR_INF)
+			r = c / 2;
+		else if (rnd & 1)
+			r = c - 1;
+
+		if (b <= INT_MAX && c <= INT_MAX) {
+			if (a <= INT_MAX)
+				return (a * b + r) / c;
+			else {
+				int64_t ad = a / c;
+				int64_t a2 = (a % c * b + r) / c;
+				if (ad >= INT32_MAX && b && ad > (INT64_MAX - a2) / b)
+					return INT64_MIN;
+				return ad * b + a2;
+			}
+		}
+		else {
+#if 1
+			uint64_t a0 = a & 0xFFFFFFFF;
+			uint64_t a1 = a >> 32;
+			uint64_t b0 = b & 0xFFFFFFFF;
+			uint64_t b1 = b >> 32;
+			uint64_t t1 = a0 * b1 + a1 * b0;
+			uint64_t t1a = t1 << 32;
+			int i;
+
+			a0 = a0 * b0 + t1a;
+			a1 = a1 * b1 + (t1 >> 32) + (a0 < t1a);
+			a0 += r;
+			a1 += a0 < r;
+
+			for (i = 63; i >= 0; i--) {
+				a1 += a1 + ((a0 >> i) & 1);
+				t1 += t1;
+				if (c <= a1) {
+					a1 -= c;
+					t1++;
+				}
+			}
+			if (t1 > INT64_MAX)
+				return INT64_MIN;
+			return t1;
+		}
+#else
+			AVInteger ai;
+			ai = av_mul_i(av_int2i(a), av_int2i(b));
+			ai = av_add_i(ai, av_int2i(r));
+
+			return av_i2int(av_div_i(ai, av_int2i(c)));
+	}
+#endif
+}
+
+	int64_t av_rescale(int64_t a, int64_t b, int64_t c)
+	{
+		return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);
+	}
+
+#define PCR_TIME_BASE				27000000
 #define TS_SIZE						188
 #define TS_HEADER_SIZE				4
 #define TS_HEADER_SIZE_AF			6
@@ -43,7 +130,7 @@ namespace util {
 		return !!(ts[3] & 0x20);
 	}
 
-	inline uint8_t ts_get_adaptation(const uint8_t* ts)
+	inline uint8_t ts_get_adaptation_length(const uint8_t* ts)
 	{
 		return ts[4];
 	}
@@ -134,7 +221,7 @@ namespace util {
 			return ts + TS_SIZE;
 		if (!ts_has_adaptation(ts))
 			return ts + TS_HEADER_SIZE;
-		return ts + TS_HEADER_SIZE + 1 + ts_get_adaptation(ts);
+		return ts + TS_HEADER_SIZE + 1 + ts_get_adaptation_length(ts);
 	}
 
 	inline uint8_t* ts_section(uint8_t* ts)
@@ -143,6 +230,13 @@ namespace util {
 			return ts_payload(ts);
 
 		return ts_payload(ts) + 1; /* pointer_field */
+	}
+
+	inline uint8_t* ts_adaptation_field(uint8_t* ts)
+	{
+		if (ts_has_adaptation(ts))
+			return ts + 5;
+		return nullptr;
 	}
 
 	inline void psi_set_tableid(uint8_t* section, uint8_t table_id)
@@ -264,6 +358,117 @@ namespace util {
 		pmtn[1] &= ~0x1f;
 		pmtn[1] |= pid >> 8;
 		pmtn[2] = pid & 0xff;
+	}
+
+	inline void tsaf_set_discontinuity(uint8_t* ts)
+	{
+		ts[5] |= 0x80;
+	}
+
+	inline void tsaf_set_randomaccess(uint8_t* ts)
+	{
+		ts[5] |= 0x40;
+	}
+
+	inline void tsaf_set_streampriority(uint8_t* ts)
+	{
+		ts[5] |= 0x20;
+	}
+
+	inline void tsaf_set_pcr(uint8_t* ts, uint64_t pcr)
+	{
+		ts[5] |= 0x10;
+		ts[6] = (pcr >> 25) & 0xff;
+		ts[7] = (pcr >> 17) & 0xff;
+		ts[8] = (pcr >> 9) & 0xff;
+		ts[9] = (pcr >> 1) & 0xff;
+		ts[10] = 0x7e | ((pcr << 7) & 0x80);
+		ts[11] = 0;
+	}
+
+	inline void tsaf_set_pcrext(uint8_t* ts, uint16_t pcr_ext)
+	{
+		ts[10] |= (pcr_ext >> 8) & 0x1;
+		ts[11] = pcr_ext & 0xff;
+	}
+
+	inline void pes_init(uint8_t* pes)
+	{
+		pes[0] = 0x0;
+		pes[1] = 0x0;
+		pes[2] = 0x1;
+	}
+
+	inline void pes_set_streamid(uint8_t* pes, uint8_t stream_id)
+	{
+		pes[3] = stream_id;
+	}
+
+	inline void pes_set_length(uint8_t* pes, uint16_t length)
+	{
+		pes[4] = length >> 8;
+		pes[5] = length & 0xff;
+	}
+
+	inline void pes_set_headerlength(uint8_t* pes, uint8_t length)
+	{
+		pes[6] = 0x80;
+		pes[7] = 0x0;
+		pes[8] = length;
+		if (length > 0)
+			memset(&pes[9], 0xff, length); /* stuffing */
+	}
+
+	inline void pes_set_dataalignment(uint8_t* pes)
+	{
+		pes[6] |= 0x4;
+	}
+
+	inline bool pes_has_pts(const uint8_t* pes)
+	{
+		return !!(pes[7] & 0x80);
+	}
+
+	inline bool pes_has_dts(const uint8_t* pes)
+	{
+		return (pes[7] & 0xc0) == 0xc0;
+	}
+
+	inline void pes_set_pts(uint8_t* pes, uint64_t pts)
+	{
+		pes[7] |= 0x80;
+		if (pes[8] < 5)
+			pes[8] = 5;
+		uint8_t marker = pes_has_dts(pes) ? 0x30 : 0x20;
+		pes[9] = marker | 0x1 | ((pts >> 29) & 0xe);
+		pes[10] = (pts >> 22) & 0xff;
+		pes[11] = 0x1 | ((pts >> 14) & 0xfe);
+		pes[12] = (pts >> 7) & 0xff;
+		pes[13] = 0x1 | ((pts << 1) & 0xfe);
+	}
+
+	inline void pes_set_dts(uint8_t* pes, uint64_t dts)
+	{
+		pes[7] |= 0x40;
+		if (pes[8] < 10)
+			pes[8] = 10;
+		pes[9] &= 0x0f;
+		pes[9] |= 0x30;
+		pes[14] = 0x11 | ((dts >> 29) & 0xe);
+		pes[15] = (dts >> 22) & 0xff;
+		pes[16] = 0x1 | ((dts >> 14) & 0xfe);
+		pes[17] = (dts >> 7) & 0xff;
+		pes[18] = 0x1 | ((dts << 1) & 0xfe);
+	}
+
+	inline uint8_t pes_get_headerlength(const uint8_t* pes)
+	{
+		return pes[8];
+	}
+
+	inline uint8_t* pes_payload(uint8_t* pes)
+	{
+		return pes + PES_HEADER_SIZE + PES_HEADER_OPTIONAL_SIZE + pes_get_headerlength(pes);
 	}
 
 	static const uint32_t static_crc_table[256] = {
@@ -585,6 +790,8 @@ namespace util {
 		m_pat_count = 0;
 		m_pmt_count = 0;
 		m_pmt_pid = 4095;
+		m_first_pcr = 0;
+		m_total_bytes = 0;
 	}
 
 	mpegts_parser::~mpegts_parser()
@@ -824,6 +1031,11 @@ namespace util {
 			{
 				pes_headerlength = payload[8];
 				int pes_length = (payload[4] << 8) | payload[5];
+				int stream_id = payload[3];
+				if (stream_id == 190)
+				{
+					std::cout << "1011 1110\n";
+				}
 				bool has_pts = !!(payload[7] & 0x80);
 				bool has_dts = (payload[7] & 0xc0) == 0xc0;
 				uint64_t pts = 0, dts = 0;
@@ -1246,8 +1458,10 @@ namespace util {
 			return false;
 		}
 
+		auto& cur_stream = found->second;
+
 		bool write_pat_pmt = false;
-		bool write_pcr = false;
+		bool write_pcr = true;
 		bool only_audio = false;
 
 		// 判断是否添加pat pmt, 如果只有音频, 那就按pcr一样
@@ -1261,6 +1475,13 @@ namespace util {
 		{
 			write_pat_pmt = true;
 			write_pcr = true;
+			m_packet_count = 0;
+		}
+
+		// 如果有音视频, 且此次写入的是音频, 则不写入pcr.
+		if (info.is_audio_ && stream_size > 1)
+		{
+			write_pcr = false;
 		}
 
 		// 插入pat/pmt包.
@@ -1275,6 +1496,141 @@ namespace util {
 			auto pmt_data = m_mpegts_data.prepare(188);
 			add_pmt(pmt_data);
 			m_mpegts_data.commit(188);
+
+			// 更新字节数.
+			m_total_bytes += (188 * 2);
+			m_packet_count += 2;
+		}
+
+		bool unitstart = true;
+		const uint8_t* begin = info.payload_begin_;
+		const uint8_t* end = info.payload_end_;
+		for (; begin != end;)
+		{
+			// 以188为1个TS包写入流.
+			auto ts = m_mpegts_data.prepare(188);
+
+			// TS HEADER.
+			ts_set_pid(ts, 0);
+			ts_set_transportpriority(ts);
+			ts_set_payload(ts);
+			ts_set_cc(ts, cur_stream.cc_++);
+			if (unitstart)
+				ts_set_unitstart(ts);	// 设置为起始包.
+
+			if (write_pcr)
+			{
+				write_pcr = false;
+
+				ts_set_adaptation(ts, 7);	// 写入pcr信息.
+				// auto afc = ts_adaptation_field(ts);
+				// *afc = 0b00100000;		// only PCR_flag.
+				tsaf_set_discontinuity(ts);
+				tsaf_set_randomaccess(ts);
+				tsaf_set_streampriority(ts);
+
+				int64_t pcr = 0;
+				if (info.dts_ != -1)
+					pcr = info.dts_ * 300;
+				else
+					pcr = av_rescale(m_total_bytes + 11, 8 * PCR_TIME_BASE, 1) + m_first_pcr;
+				int64_t pcr_low = pcr % 300, pcr_high = pcr / 300;
+				tsaf_set_pcr(ts, pcr_high);
+				tsaf_set_pcrext(ts, pcr_low);
+			}
+
+			// 数据写入位置.
+			auto payload = ts_payload(ts);
+
+			// 如果是关键帧, 则开始写入PES.
+			if (info.pict_type_ == av_picture_type_i && unitstart)
+			{
+				int stream_id = -1;
+				if (info.is_video_)
+				{
+					if (cur_stream.stream_type_ == video_dirac)
+						stream_id = 0xfd;
+					else
+						stream_id = 0xe0;
+				}
+				else
+				{
+					if (cur_stream.stream_type_ == audio_mpeg2||
+						cur_stream.stream_type_ == audio_mpeg1||
+						cur_stream.stream_type_ == audio_aac||
+						cur_stream.stream_type_ == audio_aac_latm)
+						stream_id = 0xc0;
+					else if (cur_stream.stream_type_ == audio_ac3)
+						stream_id = 0xfd;
+					else
+						stream_id = 0xfc;
+				}
+
+				auto pes = ts_payload(ts);
+				pes_init(pes);
+				int pes_header_length = 0;
+				if (info.dts_ != -1)
+					pes_header_length += 5;
+				if (info.pts_ != -1)
+					pes_header_length += 5;
+				pes_set_streamid(pes, stream_id);
+				// total pes length = PES_HEADER_SIZE + PES_HEADER_OPTIONAL_SIZE
+				//					  + pes_header_length + pes_length.
+				pes_set_length(pes, 0);
+				pes_set_headerlength(pes, pes_header_length);
+				if (info.dts_ != -1)
+					pes_set_dts(pes, info.dts_);
+				if (info.pts_ != -1)
+					pes_set_pts(pes, info.pts_);
+				payload = pes_payload(pes);
+			}
+
+			auto header_len = payload - ts;
+			auto payload_size = end - begin;
+			auto len = TS_SIZE - header_len;
+			if (len > payload_size)
+				len = payload_size;
+			auto stuffing_len = TS_SIZE - header_len - len;
+			if (stuffing_len > 0)
+			{
+				if (ts_has_adaptation(ts))
+				{
+					// stuffing already present: increase its size.
+					auto afc_len = ts_get_adaptation_length(ts);
+					memmove(ts + 4 + afc_len + stuffing_len,
+						ts + 4 + afc_len,
+						header_len - (4 + afc_len));
+					ts[4] += stuffing_len;
+					memset(ts + 4 + afc_len, 0xff, stuffing_len);
+				}
+				else
+				{
+					// add stuffing.
+					memmove(ts + 4 + stuffing_len, ts + 4, header_len - 4);
+					ts[3] |= 0x20;
+					ts[4] = stuffing_len - 1;
+					if (stuffing_len >= 2)
+					{
+						ts[5] = 0x00;
+						memset(ts + 6, 0xff, stuffing_len - 2);
+					}
+				}
+			}
+
+			if (payload_size == len)
+			{
+				memcpy(ts + TS_SIZE - len, begin, len - 1);
+				ts[TS_SIZE - 1] = 0xff;
+			}
+			else
+			{
+				memcpy(ts + TS_SIZE - len, begin, len);
+			}
+
+			begin += len;
+			m_mpegts_data.commit(188);
+			m_packet_count++;
+			unitstart = false;
 		}
 
 		return false;
