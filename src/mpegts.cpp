@@ -1654,4 +1654,192 @@ namespace util {
 			return std::string(found->second);
 		return "";
 	}
+
+	byte_streambuf::byte_streambuf()
+	{
+		clear();
+	}
+
+	byte_streambuf::byte_streambuf(byte_streambuf&& rhs)
+		: m_buffer(std::move(rhs.m_buffer))
+	{
+		setg(rhs.m_get_first, rhs.m_get_next, rhs.m_get_last);
+		setp(rhs.m_put_first, rhs.m_put_next, rhs.m_put_last);
+	}
+
+	byte_streambuf::~byte_streambuf()
+	{}
+
+	void byte_streambuf::clear()
+	{
+		m_buffer.swap(std::vector<uint8_t>());
+
+		m_max_size = std::numeric_limits<std::size_t>::max();
+		std::size_t pend = (std::min<std::size_t>)(m_max_size, buffer_delta);
+		m_buffer.resize((std::max<std::size_t>)(pend, 1));
+
+		setg(&m_buffer[0], &m_buffer[0], &m_buffer[0]);
+		setp(&m_buffer[0], &m_buffer[0] + pend);
+	}
+
+	void byte_streambuf::shrink_to_fit()
+	{
+		// Get current stream positions as offsets.
+		std::size_t gnext = gptr() - &m_buffer[0];
+		std::size_t pnext = pptr() - &m_buffer[0];
+		std::size_t pend = epptr() - &m_buffer[0];
+
+		if ((pend - pnext) > (pnext - gnext))
+		{
+			// Shift existing contents of get area to start of buffer.
+			if (gnext > 0)
+			{
+				pnext -= gnext;
+				std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
+			}
+
+			m_buffer.resize(pnext);
+			m_buffer.shrink_to_fit();
+
+			// Update stream positions.
+			pend = pnext;
+			setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
+			setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
+		}
+	}
+
+	size_t byte_streambuf::size() const noexcept
+	{
+		return pptr() - gptr();
+	}
+
+	size_t byte_streambuf::capacity() const noexcept
+	{
+		return m_buffer.capacity();
+	}
+
+	const uint8_t* byte_streambuf::data() const noexcept
+	{
+		return gptr();
+	}
+
+	uint8_t* byte_streambuf::prepare(size_t n)
+	{
+		reserve(n);
+		return pptr();
+	}
+
+	void byte_streambuf::commit(size_t n)
+	{
+		if (pptr() + n > epptr())
+		{
+			//	n = epptr() - pptr();
+			std::length_error ex("byte_streambuf commit too long");
+			throw ex;
+		}
+
+		m_put_next += n;
+		setg(eback(), gptr(), pptr());
+	}
+
+	void byte_streambuf::consume(size_t n)
+	{
+		if (egptr() < pptr())
+			setg(&m_buffer[0], gptr(), pptr());
+		if (gptr() + n > pptr())
+		{
+			// n = pptr() - gptr();
+			std::length_error ex("byte_streambuf consume too long");
+			throw ex;
+		}
+
+		m_get_next += n;
+	}
+
+	void byte_streambuf::reserve(std::size_t n)
+	{
+		// Get current stream positions as offsets.
+		std::size_t gnext = gptr() - &m_buffer[0];
+		std::size_t pnext = pptr() - &m_buffer[0];
+		std::size_t pend = epptr() - &m_buffer[0];
+
+		// Check if there is already enough space in the put area.
+		if (n <= pend - pnext)
+		{
+			return;
+		}
+
+		// Shift existing contents of get area to start of buffer.
+		if (gnext > 0)
+		{
+			pnext -= gnext;
+			std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
+		}
+
+		// Ensure buffer is large enough to hold at least the specified size.
+		if (n > pend - pnext)
+		{
+			if (n <= m_max_size && pnext <= m_max_size - n)
+			{
+				pend = pnext + n;
+				m_buffer.resize((std::max<std::size_t>)(pend, 1));
+			}
+			else
+			{
+				std::length_error ex("byte_streambuf too long");
+				throw ex;
+			}
+		}
+
+		// Update stream positions.
+		setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
+		setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
+	}
+
+	void byte_streambuf::setg(uint8_t* f, uint8_t* n, uint8_t* l)
+	{
+		m_get_first = f;
+		m_get_next = n;
+		m_get_last = l;
+	}
+
+	void byte_streambuf::setp(uint8_t* f, uint8_t* l)
+	{
+		m_put_first = f;
+		m_put_next = f;
+		m_put_last = l;
+	}
+
+	void byte_streambuf::setp(uint8_t* f, uint8_t* n, uint8_t* l)
+	{
+		m_put_first = f;
+		m_put_next = n;
+		m_put_last = l;
+	}
+
+	uint8_t* byte_streambuf::pptr() const
+	{
+		return m_put_next;
+	}
+
+	uint8_t* byte_streambuf::gptr() const
+	{
+		return m_get_next;
+	}
+
+	uint8_t* byte_streambuf::epptr() const
+	{
+		return m_put_last;
+	}
+
+	uint8_t* byte_streambuf::eback() const
+	{
+		return m_get_first;
+	}
+
+	uint8_t* byte_streambuf::egptr() const
+	{
+		return m_get_last;
+	}
+
 }

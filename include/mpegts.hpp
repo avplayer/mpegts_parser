@@ -26,194 +26,34 @@ namespace util {
 		enum { buffer_delta = 256 };
 
 	public:
-		byte_streambuf()
-		{
-			clear();
-		}
-		~byte_streambuf()
-		{}
+		byte_streambuf();
+		~byte_streambuf();
 
 		// 支持move构造.
-		byte_streambuf(byte_streambuf&& rhs)
-			: m_buffer(std::move(rhs.m_buffer))
-		{
-			setg(rhs.m_get_first, rhs.m_get_next, rhs.m_get_last);
-			setp(rhs.m_put_first, rhs.m_put_next, rhs.m_put_last);
-		}
+		byte_streambuf(byte_streambuf&& rhs);
 
 	public:
-		void clear()
-		{
-			m_buffer.swap(std::vector<uint8_t>());
+		void clear();
+		void shrink_to_fit();
+		size_t size() const noexcept;
+		size_t capacity() const noexcept;
+		const uint8_t* data() const noexcept;
+		uint8_t* prepare(size_t n);
 
-			m_max_size = std::numeric_limits<std::size_t>::max();
-			std::size_t pend = (std::min<std::size_t>)(m_max_size, buffer_delta);
-			m_buffer.resize((std::max<std::size_t>)(pend, 1));
-
-			setg(&m_buffer[0], &m_buffer[0], &m_buffer[0]);
-			setp(&m_buffer[0], &m_buffer[0] + pend);
-		}
-
-		void shrink_to_fit()
-		{
-			// Get current stream positions as offsets.
-			std::size_t gnext = gptr() - &m_buffer[0];
-			std::size_t pnext = pptr() - &m_buffer[0];
-			std::size_t pend = epptr() - &m_buffer[0];
-
-			if ((pend - pnext) > (pnext - gnext))
-			{
-				// Shift existing contents of get area to start of buffer.
-				if (gnext > 0)
-				{
-					pnext -= gnext;
-					std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
-				}
-
-				m_buffer.resize(pnext);
-				m_buffer.shrink_to_fit();
-
-				// Update stream positions.
-				pend = pnext;
-				setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
-				setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
-			}
-		}
-
-		size_t size() const noexcept
-		{
-			return pptr() - gptr();
-		}
-
-		size_t capacity() const noexcept
-		{
-			return m_buffer.capacity();
-		}
-
-		const uint8_t* data() const noexcept
-		{
-			return gptr();
-		}
-
-		uint8_t* prepare(size_t n)
-		{
-			reserve(n);
-			return pptr();
-		}
-
-		void commit(size_t n)
-		{
-			if (pptr() + n > epptr())
-			{
-				//	n = epptr() - pptr();
-				std::length_error ex("byte_streambuf commit too long");
-				throw ex;
-			}
-
-			m_put_next += n;
-			setg(eback(), gptr(), pptr());
-		}
-
-		void consume(size_t n)
-		{
-			if (egptr() < pptr())
-				setg(&m_buffer[0], gptr(), pptr());
-			if (gptr() + n > pptr())
-			{
-				// n = pptr() - gptr();
-				std::length_error ex("byte_streambuf consume too long");
-				throw ex;
-			}
-
-			m_get_next += n;
-		}
+		void commit(size_t n);
+		void consume(size_t n);
 
 	protected:
-		void reserve(std::size_t n)
-		{
-			// Get current stream positions as offsets.
-			std::size_t gnext = gptr() - &m_buffer[0];
-			std::size_t pnext = pptr() - &m_buffer[0];
-			std::size_t pend = epptr() - &m_buffer[0];
+		void reserve(std::size_t n);
+		void setg(uint8_t* f, uint8_t* n, uint8_t* l);
+		void setp(uint8_t* f, uint8_t* l);
+		void setp(uint8_t* f, uint8_t* n, uint8_t* l);
 
-			// Check if there is already enough space in the put area.
-			if (n <= pend - pnext)
-			{
-				return;
-			}
-
-			// Shift existing contents of get area to start of buffer.
-			if (gnext > 0)
-			{
-				pnext -= gnext;
-				std::memmove(&m_buffer[0], &m_buffer[0] + gnext, pnext);
-			}
-
-			// Ensure buffer is large enough to hold at least the specified size.
-			if (n > pend - pnext)
-			{
-				if (n <= m_max_size && pnext <= m_max_size - n)
-				{
-					pend = pnext + n;
-					m_buffer.resize((std::max<std::size_t>)(pend, 1));
-				}
-				else
-				{
-					std::length_error ex("byte_streambuf too long");
-					throw ex;
-				}
-			}
-
-			// Update stream positions.
-			setg(&m_buffer[0], &m_buffer[0], &m_buffer[0] + pnext);
-			setp(&m_buffer[0] + pnext, &m_buffer[0] + pend);
-		}
-
-		void setg(uint8_t* f, uint8_t* n, uint8_t* l)
-		{
-			m_get_first = f;
-			m_get_next = n;
-			m_get_last = l;
-		}
-
-		void setp(uint8_t* f, uint8_t* l)
-		{
-			m_put_first = f;
-			m_put_next = f;
-			m_put_last = l;
-		}
-
-		void setp(uint8_t* f, uint8_t* n, uint8_t* l)
-		{
-			m_put_first = f;
-			m_put_next = n;
-			m_put_last = l;
-		}
-
-		uint8_t* pptr() const
-		{
-			return m_put_next;
-		}
-
-		uint8_t* gptr() const
-		{
-			return m_get_next;
-		}
-
-		uint8_t* epptr() const
-		{
-			return m_put_last;
-		}
-
-		uint8_t* eback() const
-		{
-			return m_get_first;
-		}
-
-		uint8_t* egptr() const
-		{
-			return m_get_last;
-		}
+		uint8_t* pptr() const;
+		uint8_t* gptr() const;
+		uint8_t* epptr() const;
+		uint8_t* eback() const;
+		uint8_t* egptr() const;
 
 	private:
 		std::vector<uint8_t> m_buffer;
