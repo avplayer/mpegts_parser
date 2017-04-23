@@ -70,15 +70,15 @@ int main(int argc, char** argv)
 	mi.is_video_ = true;
 	mi.is_audio_ = false;
 	p.mux_stream(mi);
-	{
-		util::mpegts_info info;
-		auto size = p.mpegts_size();
-		uint8_t* data = (uint8_t*)malloc(size);
-		p.fetch_mpegts(data, size);
-		p.do_parser(data, info);
-		p.do_parser(data + 188, info);
-		std::cout << info.pid_;
-	}
+// 	{
+// 		util::mpegts_info info;
+// 		auto size = p.mpegts_size();
+// 		uint8_t* data = (uint8_t*)malloc(size);
+// 		p.fetch_mpegts(data, size);
+// 		p.do_parser(data, info);
+// 		p.do_parser(data + 188, info);
+// 		std::cout << info.pid_;
+// 	}
 	while (!feof(fp)) {
 
 		if (buf.size() < 188) {
