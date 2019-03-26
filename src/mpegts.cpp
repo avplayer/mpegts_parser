@@ -1,65 +1,72 @@
 ﻿#include "mpegts.hpp"
+#include <limits>
 #include <iostream>
 #include <cstring>
+#include <cinttypes>
+#include <cstdint>
+#include <climits>
 #include <algorithm>
 #include <boost/assert.hpp>
 
+#ifdef _MSC_VER
+#pragma warning(disable: 4018 4244)
+#endif // _MSC_VER
+
 namespace util {
 
-#ifndef AV_RB32
-#   define AV_RB32(x)                                \
-	(((uint32_t)((const uint8_t*)(x))[0] << 24) |    \
-			   (((const uint8_t*)(x))[1] << 16) |    \
-			   (((const uint8_t*)(x))[2] <<  8) |    \
-				((const uint8_t*)(x))[3])
-#endif
+	inline uint32_t av_rb32(const uint8_t* x)
+	{
+		return (((uint32_t)((const uint8_t*)(x))[0] << 24) |
+			(((const uint8_t*)(x))[1] << 16) |
+			(((const uint8_t*)(x))[2] << 8) |
+			((const uint8_t*)(x))[3]);
+	}
 
-	enum AVRounding {
-		AV_ROUND_ZERO = 0, ///< Round toward zero.
-		AV_ROUND_INF = 1, ///< Round away from zero.
-		AV_ROUND_DOWN = 2, ///< Round toward -infinity.
-		AV_ROUND_UP = 3, ///< Round toward +infinity.
-		AV_ROUND_NEAR_INF = 5, ///< Round to nearest and halfway cases away from zero.
-		AV_ROUND_PASS_MINMAX = 8192, ///< Flag to pass INT64_MIN/MAX through instead of rescaling, this avoids special cases for AV_NOPTS_VALUE
+	enum av_rounding {
+		av_round_zero = 0, ///< Round toward zero.
+		av_round_inf = 1, ///< Round away from zero.
+		av_round_down = 2, ///< Round toward -infinity.
+		av_round_up = 3, ///< Round toward +infinity.
+		av_round_near_inf = 5, ///< Round to nearest and halfway cases away from zero.
+		av_round_pass_minmax = 8192, ///< Flag to pass INT64_MIN/MAX through instead of rescaling, this avoids special cases for AV_NOPTS_VALUE
 	};
 
-	int64_t av_rescale_rnd(int64_t a, int64_t b, int64_t c, int rnd)
+	inline int64_t av_rescale_rnd(int64_t a, int64_t b, int64_t c, int rnd)
 	{
 		int64_t r = 0;
 		BOOST_ASSERT(c > 0);
 		BOOST_ASSERT(b >= 0);
-		BOOST_ASSERT((unsigned)(rnd&~AV_ROUND_PASS_MINMAX) <= 5 && (rnd&~AV_ROUND_PASS_MINMAX) != 4);
+		BOOST_ASSERT((unsigned)(rnd&~av_round_pass_minmax) <= 5 && (rnd&~av_round_pass_minmax) != 4);
 
-		if (c <= 0 || b < 0 || !((unsigned)(rnd&~AV_ROUND_PASS_MINMAX) <= 5 && (rnd&~AV_ROUND_PASS_MINMAX) != 4))
-			return INT64_MIN;
+		if (c <= 0 || b < 0 || !((unsigned)(rnd&~av_round_pass_minmax) <= 5 && (rnd&~av_round_pass_minmax) != 4))
+			return std::numeric_limits<int64_t>::min();
 
-		if (rnd & AV_ROUND_PASS_MINMAX) {
-			if (a == INT64_MIN || a == INT64_MAX)
+		if (rnd & av_round_pass_minmax) {
+			if (a == std::numeric_limits<int64_t>::min() || a == std::numeric_limits<int64_t>::max())
 				return a;
-			rnd -= AV_ROUND_PASS_MINMAX;
+			rnd -= av_round_pass_minmax;
 		}
 
 		if (a < 0)
-			return -(uint64_t)av_rescale_rnd(-std::max(a, -INT64_MAX), b, c, rnd ^ ((rnd >> 1) & 1));
+			return -av_rescale_rnd(-std::max(a, -std::numeric_limits<int64_t>::max()), b, c, rnd ^ ((rnd >> 1) & 1));
 
-		if (rnd == AV_ROUND_NEAR_INF)
+		if (rnd == av_round_near_inf)
 			r = c / 2;
 		else if (rnd & 1)
 			r = c - 1;
 
-		if (b <= INT_MAX && c <= INT_MAX) {
-			if (a <= INT_MAX)
+		if (b <= std::numeric_limits<int>::max() && c <= std::numeric_limits<int>::max()) {
+			if (a <= std::numeric_limits<int>::max())
 				return (a * b + r) / c;
 			else {
 				int64_t ad = a / c;
 				int64_t a2 = (a % c * b + r) / c;
-				if (ad >= INT32_MAX && b && ad > (INT64_MAX - a2) / b)
-					return INT64_MIN;
+				if (ad >= std::numeric_limits<int32_t>::max() && b && ad > (std::numeric_limits<int64_t>::max() - a2) / b)
+					return std::numeric_limits<int64_t>::min();
 				return ad * b + a2;
 			}
 		}
 		else {
-#if 1
 			uint64_t a0 = a & 0xFFFFFFFF;
 			uint64_t a1 = a >> 32;
 			uint64_t b0 = b & 0xFFFFFFFF;
@@ -81,23 +88,15 @@ namespace util {
 					t1++;
 				}
 			}
-			if (t1 > INT64_MAX)
-				return INT64_MIN;
+			if (t1 > std::numeric_limits<int64_t>::max())
+				return std::numeric_limits<int64_t>::min();
 			return t1;
 		}
-#else
-			AVInteger ai;
-			ai = av_mul_i(av_int2i(a), av_int2i(b));
-			ai = av_add_i(ai, av_int2i(r));
-
-			return av_i2int(av_div_i(ai, av_int2i(c)));
 	}
-#endif
-}
 
-	int64_t av_rescale(int64_t a, int64_t b, int64_t c)
+	inline int64_t av_rescale(int64_t a, int64_t b, int64_t c)
 	{
-		return av_rescale_rnd(a, b, c, AV_ROUND_NEAR_INF);
+		return av_rescale_rnd(a, b, c, av_round_near_inf);
 	}
 
 #define PCR_TIME_BASE				27000000
@@ -702,7 +701,7 @@ namespace util {
 		}
 
 		p = std::min(p, end) - 4;
-		*state = AV_RB32(p);
+		*state = av_rb32(p);
 
 		return p + 4;
 	}
@@ -878,7 +877,7 @@ namespace util {
 			if (check_crc)
 			{
 				// CRC32.
-				info.crc_ = AV_RB32(parse_ptr);
+				info.crc_ = av_rb32(parse_ptr);
 				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
 				if (crc != info.crc_)
 				{
@@ -1001,7 +1000,7 @@ namespace util {
 			if (check_crc)
 			{
 				// CRC32.
-				info.crc_ = AV_RB32(parse_ptr);
+				info.crc_ = av_rb32(parse_ptr);
 				auto crc = crc32(section_ptr, parse_ptr - section_ptr);
 				if (crc != info.crc_)
 				{
@@ -1031,11 +1030,7 @@ namespace util {
 			{
 				pes_headerlength = payload[8];
 				int pes_length = (payload[4] << 8) | payload[5];
-				int stream_id = payload[3];
-				if (stream_id == 190)
-				{
-					std::cout << "1011 1110\n";
-				}
+				// int stream_id = payload[3];
 				bool has_pts = !!(payload[7] & 0x80);
 				bool has_dts = (payload[7] & 0xc0) == 0xc0;
 				uint64_t pts = 0, dts = 0;
@@ -1536,7 +1531,7 @@ namespace util {
 					pcr = av_rescale(m_total_bytes + 11, 8 * PCR_TIME_BASE, 1) + m_first_pcr;
 				int64_t pcr_low = pcr % 300, pcr_high = pcr / 300;
 				tsaf_set_pcr(ts, pcr_high);
-				tsaf_set_pcrext(ts, pcr_low);
+				tsaf_set_pcrext(ts, static_cast<uint16_t>(pcr_low));
 			}
 
 			// 数据写入位置.
@@ -1636,7 +1631,7 @@ namespace util {
 		return false;
 	}
 
-	int mpegts_parser::mpegts_size() const
+	size_t mpegts_parser::mpegts_size() const
 	{
 		return m_mpegts_data.size();
 	}
@@ -1672,7 +1667,7 @@ namespace util {
 
 	void byte_streambuf::clear()
 	{
-		m_buffer.swap(std::vector<uint8_t>());
+		m_buffer.clear();
 
 		m_max_size = std::numeric_limits<std::size_t>::max();
 		std::size_t pend = (std::min<std::size_t>)(m_max_size, buffer_delta);

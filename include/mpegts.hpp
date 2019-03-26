@@ -206,7 +206,7 @@ namespace util {
 		bool mux_stream(const mpegts_info& info);
 
 		// 获取已经编码的ts数据大小.
-		int mpegts_size() const;
+		size_t mpegts_size() const;
 		// 从已经编码的ts数据缓冲中取出指定大小的ts数据.
 		void fetch_mpegts(uint8_t* data, int size);
 
